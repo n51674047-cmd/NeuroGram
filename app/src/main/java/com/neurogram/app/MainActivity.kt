@@ -541,13 +541,4 @@ private fun ProfileScreen(email: String, onBack: () -> Unit, onLogout: () -> Uni
 }
 
 @Composable
-private fun ProfileScreen(email: String, onBack: () -> Unit, onLogout: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
-        Spacer(Modifier.height(35.dp))
-        Text("Профиль", color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-        Text(email, color = Muted, fontSize = 15.sp, modifier = Modifier.padding(top = 12.dp))
-        Spacer(Modifier.height(25.dp))
-        Button(onClick = onLogout, colors = ButtonDefaults.buttonColors(containerColor = Red)) { Text("Выйти из аккаунта") }
-    }
 }
