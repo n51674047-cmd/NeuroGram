@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -30,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -94,6 +96,8 @@ private fun NeuroGramApp() {
     var selectedChatId by remember { mutableStateOf("") }
     var selectedChatTitle by remember { mutableStateOf("") }
     var chats by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val drawerScope = rememberCoroutineScope()
 
     DisposableEffect(auth) {
         val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
@@ -238,63 +242,97 @@ private fun NeuroGramApp() {
             .addOnFailureListener { loading = false; error = "Ошибка поиска: ${it.localizedMessage}" }
     }
 
-    Surface(Modifier.fillMaxSize(), color = Bg) {
-        AnimatedContent(
-            targetState = page,
-            label = "screen",
-            transitionSpec = {
-                (slideInVertically { it / 12 } + fadeIn()) togetherWith
-                    (slideOutVertically { -it / 12 } + fadeOut())
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = currentUser != null,
+        drawerContent = {
+            if (currentUser != null) {
+                ModalDrawerSheet(drawerContainerColor = Panel) {
+                    Spacer(Modifier.height(30.dp))
+                    Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(44.dp).background(Red, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                            Text("N", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Black)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("NeuroGram", color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                            Text("МЕНЮ МЕССЕНДЖЕРА", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp)
+                        }
+                    }
+                    HorizontalDivider(color = Divider, modifier = Modifier.padding(vertical = 10.dp))
+                    Text("ОСНОВНОЕ", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 6.dp))
+                    NavigationDrawerItem(label = { Text("Мои чаты") }, selected = page == "chats",
+                        onClick = { page = "chats"; drawerScope.launch { drawerState.close() } },
+                        icon = { Text("▤", color = Red, fontSize = 19.sp) }, modifier = Modifier.padding(horizontal = 10.dp))
+                    NavigationDrawerItem(label = { Text("Профиль") }, selected = page == "profile",
+                        onClick = { page = "profile"; drawerScope.launch { drawerState.close() } },
+                        icon = { Text("●", color = Red, fontSize = 19.sp) }, modifier = Modifier.padding(horizontal = 10.dp))
+                    HorizontalDivider(color = Divider, modifier = Modifier.padding(vertical = 10.dp))
+                    Text("НАСТРОЙКИ", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 6.dp))
+                    listOf("Приватность и безопасность", "Уведомления", "Чаты и данные", "Оформление", "О приложении").forEach { item ->
+                        NavigationDrawerItem(label = { Text(item) }, selected = page == "settings",
+                            onClick = { page = "settings"; drawerScope.launch { drawerState.close() } },
+                            icon = { Text(when(item) { "Приватность и безопасность" -> "◈"; "Уведомления" -> "♢"; "Чаты и данные" -> "▣"; "Оформление" -> "◐"; else -> "ⓘ" }, color = Red, fontSize = 18.sp) },
+                            modifier = Modifier.padding(horizontal = 10.dp))
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text("NeuroGram • версия 1.0", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(20.dp))
+                }
             }
-        ) { target ->
-            when (target) {
-                "login", "register" -> AuthScreen(
-                    register = target == "register",
-                    email = email, onEmail = { email = it },
-                    password = password, onPassword = { password = it },
-                    nickname = nickname, onNickname = { nickname = it },
-                    error = error, loading = loading,
-                    onSubmit = { isRegister = target == "register"; submitAuth() },
-                    onSwitch = {
-                        error = ""
-                        page = if (target == "register") "login" else "register"
-                    }
-                )
-                "chats" -> ChatList(
-                    userLabel = currentUser?.email ?: "Аккаунт NeuroGram",
-                    chats = chats,
-                    error = error,
-                    loading = loading,
-                    onAddChat = { startChat(it) },
-                    onOpenChat = { chat ->
-                        selectedChatId = chat.id
-                        selectedChatTitle = chat.title
-                        page = "chat"
-                    },
-                    onProfile = { page = "profile" }
-                )
-                "settings" -> SettingsScreen(onBack = { page = "profile" })
-                "chat" -> ChatScreen(
-                    chatId = selectedChatId,
-                    title = selectedChatTitle,
-                    myUid = currentUser?.uid ?: "",
-                    myName = nickname.ifBlank { currentUser?.email?.substringBefore("@") ?: "Я" },
-                    db = db,
-                    onBack = { page = "chats" }
-                )
-                else -> ProfileScreen(
-                    email = currentUser?.email ?: "",
-                    onBack = { page = "chats" },
-                    onSettings = { page = "settings" },
-                    onLogout = {
-                        auth.signOut()
-                        email = ""
-                        password = ""
-                        nickname = ""
-                        error = ""
-                        page = "login"
-                    }
-                )
+        }
+    ) {
+        Surface(Modifier.fillMaxSize(), color = Bg) {
+            AnimatedContent(
+                targetState = page,
+                label = "screen",
+                transitionSpec = {
+                    (slideInVertically { it / 12 } + fadeIn()) togetherWith
+                        (slideOutVertically { -it / 12 } + fadeOut())
+                }
+            ) { target ->
+                when (target) {
+                    "login", "register" -> AuthScreen(
+                        register = target == "register",
+                        email = email, onEmail = { email = it },
+                        password = password, onPassword = { password = it },
+                        nickname = nickname, onNickname = { nickname = it },
+                        error = error, loading = loading,
+                        onSubmit = { isRegister = target == "register"; submitAuth() },
+                        onSwitch = {
+                            error = ""
+                            page = if (target == "register") "login" else "register"
+                        }
+                    )
+                    "chats" -> ChatList(
+                        userLabel = currentUser?.email ?: "Аккаунт NeuroGram",
+                        chats = chats, error = error, loading = loading,
+                        onAddChat = { startChat(it) },
+                        onOpenChat = { chat ->
+                            selectedChatId = chat.id
+                            selectedChatTitle = chat.title
+                            page = "chat"
+                        },
+                        onProfile = { page = "profile" },
+                        onMenu = { drawerScope.launch { drawerState.open() } }
+                    )
+                    "settings" -> SettingsScreen(onBack = { page = "profile" })
+                    "chat" -> ChatScreen(
+                        chatId = selectedChatId, title = selectedChatTitle,
+                        myUid = currentUser?.uid ?: "",
+                        myName = nickname.ifBlank { currentUser?.email?.substringBefore("@") ?: "Я" },
+                        db = db, onBack = { page = "chats" }
+                    )
+                    else -> ProfileScreen(
+                        email = currentUser?.email ?: "",
+                        onBack = { page = "chats" },
+                        onSettings = { page = "settings" },
+                        onLogout = {
+                            auth.signOut()
+                            email = ""; password = ""; nickname = ""; error = ""
+                            page = "login"
+                        }
+                    )
+                }
             }
         }
     }
@@ -368,62 +406,69 @@ private fun AuthField(
 @Composable
 private fun ChatList(
     userLabel: String, chats: List<ChatItem>, error: String, loading: Boolean,
-    onAddChat: (String) -> Unit, onOpenChat: (ChatItem) -> Unit, onProfile: () -> Unit
+    onAddChat: (String) -> Unit, onOpenChat: (ChatItem) -> Unit,
+    onProfile: () -> Unit, onMenu: () -> Unit
 ) {
     var showAdd by remember { mutableStateOf(false) }
     var targetUsername by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().background(Bg).padding(horizontal = 18.dp, vertical = 22.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            BrandHeader()
-            Spacer(Modifier.weight(1f))
-            Box(Modifier.size(42.dp).background(Panel, CircleShape).clickable(onClick = onProfile), contentAlignment = Alignment.Center) {
-                Text("●", color = Red, fontSize = 18.sp)
+    Box(Modifier.fillMaxSize().background(Bg)) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 18.dp).padding(top = 36.dp, bottom = 18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(42.dp).background(Panel, RoundedCornerShape(14.dp)).clickable(onClick = onMenu), contentAlignment = Alignment.Center) {
+                    Text("☰", color = Red, fontSize = 22.sp)
+                }
+                Spacer(Modifier.width(12.dp))
+                BrandHeader()
+                Spacer(Modifier.weight(1f))
+                Box(Modifier.size(42.dp).background(Panel, CircleShape).clickable(onClick = onProfile), contentAlignment = Alignment.Center) {
+                    Text("●", color = Red, fontSize = 18.sp)
+                }
             }
-        }
-        Spacer(Modifier.height(30.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
+            Spacer(Modifier.height(36.dp))
+            Column {
                 Text("Чаты", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
                 Text(userLabel, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             }
-            Button(onClick = { showAdd = true }, colors = ButtonDefaults.buttonColors(containerColor = Red), shape = RoundedCornerShape(13.dp)) {
-                Text("+ Написать", color = Color.White, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(18.dp))
+            Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("⌕", color = Muted, fontSize = 22.sp)
+                Spacer(Modifier.width(10.dp))
+                Text("Поиск по чатам", color = Muted, fontSize = 14.sp)
             }
-        }
-        Spacer(Modifier.height(18.dp))
-        Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("⌕", color = Muted, fontSize = 22.sp)
-            Spacer(Modifier.width(10.dp))
-            Text("Поиск по чатам", color = Muted, fontSize = 14.sp)
-        }
-        if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Red)
-        Spacer(Modifier.height(20.dp))
-        if (chats.isEmpty()) {
-            Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(58.dp).background(Bg, CircleShape), contentAlignment = Alignment.Center) {
-                    Text("✉", color = Red, fontSize = 27.sp)
+            if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Red)
+            Spacer(Modifier.height(20.dp))
+            if (chats.isEmpty()) {
+                Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(58.dp).background(Bg, CircleShape), contentAlignment = Alignment.Center) {
+                        Text("✉", color = Red, fontSize = 27.sp)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text("Пока нет сообщений", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Найди человека по username и начни диалог.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
                 }
-                Spacer(Modifier.height(12.dp))
-                Text("Пока нет сообщений", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                Text("Найди человека по username и начни диалог.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-            }
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                items(chats, key = { it.id }) { chat ->
-                    Row(Modifier.fillMaxWidth().background(Panel).clickable { onOpenChat(chat) }.padding(horizontal = 12.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(52.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
-                            Text(chat.title.take(1).uppercase(), color = Red, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Spacer(Modifier.width(13.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(chat.title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text(chat.lastMessage.ifBlank { "Начните переписку" }, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 1)
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(1.dp), contentPadding = PaddingValues(bottom = 90.dp)) {
+                    items(chats, key = { it.id }) { chat ->
+                        Row(Modifier.fillMaxWidth().background(Panel).clickable { onOpenChat(chat) }.padding(horizontal = 12.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(52.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
+                                Text(chat.title.take(1).uppercase(), color = Red, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.width(13.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(chat.title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                Text(chat.lastMessage.ifBlank { "Начните переписку" }, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 1)
+                            }
                         }
                     }
                 }
             }
         }
+        FloatingActionButton(
+            onClick = { showAdd = true },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(22.dp),
+            containerColor = Red, contentColor = Color.White, shape = CircleShape
+        ) { Text("+", fontSize = 30.sp, fontWeight = FontWeight.Normal) }
     }
     if (showAdd) {
         AlertDialog(
@@ -436,9 +481,7 @@ private fun ChatList(
                     OutlinedTextField(value = targetUsername, onValueChange = { targetUsername = it }, label = { Text("@username") }, singleLine = true)
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { showAdd = false; onAddChat(targetUsername) }) { Text("Найти", color = Red) }
-            },
+            confirmButton = { TextButton(onClick = { showAdd = false; onAddChat(targetUsername) }) { Text("Найти", color = Red) } },
             dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Отмена", color = Muted) } },
             containerColor = Panel
         )
