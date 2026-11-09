@@ -464,12 +464,25 @@ private fun postVerificationRequest(payload: JSONObject, callback: (Boolean, Str
         try {
             connection = (URL(VERIFICATION_API_URL).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
+                instanceFollowRedirects = false
                 connectTimeout = 20000
                 readTimeout = 30000
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
             }
             connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+            // Apps Script ContentService responds with a redirect to a one-time
+            // googleusercontent.com URL. Follow it explicitly as GET.
+            if (connection.responseCode in 300..399) {
+                val redirectUrl = connection.getHeaderField("Location")
+                    ?: throw IllegalStateException("Сервер не вернул адрес ответа")
+                connection.disconnect()
+                connection = (URL(redirectUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 20000
+                    readTimeout = 30000
+                }
+            }
             val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
             val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             val response = JSONObject(responseText.ifBlank { "{}" })
