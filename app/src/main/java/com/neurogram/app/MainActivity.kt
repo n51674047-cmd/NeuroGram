@@ -540,5 +540,3 @@ private fun ProfileScreen(email: String, onBack: () -> Unit, onLogout: () -> Uni
     }
 }
 
-@Composable
-}
