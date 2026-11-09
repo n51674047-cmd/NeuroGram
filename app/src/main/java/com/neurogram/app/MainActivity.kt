@@ -3,6 +3,17 @@ package com.neurogram.app
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -51,29 +62,53 @@ private val demoChats = listOf(
     ChatPreview("Илья", "Ахах, понятно", "Пн", 0, Color(0xFF43AA8B))
 )
 
+@OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun NeuroGramApp() {
     var page by remember { mutableStateOf("login") }
     var selected by remember { mutableStateOf<ChatPreview?>(null) }
+    var phone by remember { mutableStateOf("") }
+    var nickname by remember { mutableStateOf("") }
 
     Surface(Modifier.fillMaxSize(), color = Bg) {
-        when (page) {
-            "login" -> AuthScreen(
-                register = false,
-                onSwitch = { page = "register" },
-                onContinue = { page = "chats" }
-            )
-            "register" -> AuthScreen(
-                register = true,
-                onSwitch = { page = "login" },
-                onContinue = { page = "chats" }
-            )
-            "chats" -> ChatList(
-                onChat = { selected = it; page = "chat" },
-                onProfile = { page = "profile" }
-            )
-            "chat" -> ChatScreen(chat = selected, onBack = { page = "chats" })
-            else -> ProfileScreen(onBack = { page = "chats" })
+        AnimatedContent(
+            targetState = page,
+            label = "NeuroGram screen transition",
+            transitionSpec = {
+                (slideInVertically { it / 12 } + fadeIn()) togetherWith
+                    (slideOutVertically { -it / 12 } + fadeOut())
+            }
+        ) { target ->
+            when (target) {
+                "login" -> AuthScreen(
+                    register = false,
+                    onSwitch = { page = "register" },
+                    onContinue = { enteredPhone, _ ->
+                        phone = enteredPhone
+                        page = "verify"
+                    }
+                )
+                "register" -> AuthScreen(
+                    register = true,
+                    onSwitch = { page = "login" },
+                    onContinue = { enteredPhone, enteredNickname ->
+                        phone = enteredPhone
+                        nickname = enteredNickname
+                        page = "verify"
+                    }
+                )
+                "verify" -> VerifyScreen(
+                    phone = phone,
+                    onBack = { page = if (nickname.isBlank()) "login" else "register" },
+                    onConfirm = { /* Real SMS verification is added with Firebase. */ }
+                )
+                "chats" -> ChatList(
+                    onChat = { selected = it; page = "chat" },
+                    onProfile = { page = "profile" }
+                )
+                "chat" -> ChatScreen(chat = selected, onBack = { page = "chats" })
+                else -> ProfileScreen(onBack = { page = "chats" })
+            }
         }
     }
 }
@@ -96,32 +131,33 @@ private fun BrandHeader() {
 }
 
 @Composable
-private fun AuthScreen(register: Boolean, onSwitch: () -> Unit, onContinue: () -> Unit) {
+private fun AuthScreen(
+    register: Boolean,
+    onSwitch: () -> Unit,
+    onContinue: (String, String) -> Unit
+) {
     var nickname by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
 
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 25.dp),
+        Modifier.fillMaxSize().padding(horizontal = 25.dp).animateContentSize(),
         verticalArrangement = Arrangement.Center
     ) {
         BrandHeader()
         Spacer(Modifier.height(48.dp))
         Text(if (register) "Создать аккаунт" else "С возвращением", color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.Bold)
         Text(
-            if (register) "Присоединяйся к NeuroGram" else "Войди, чтобы продолжить общение",
+            if (register) "Зарегистрируйся по номеру телефона" else "Войди по номеру телефона",
             color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 7.dp, bottom = 25.dp)
         )
 
         if (register) {
-            AuthField(nickname, { nickname = it }, "Имя пользователя")
+            AuthField(nickname, { nickname = it; error = "" }, "Имя пользователя")
             Spacer(Modifier.height(12.dp))
         }
-        AuthField(email, { email = it }, "Электронная почта", KeyboardType.Email)
-        Spacer(Modifier.height(12.dp))
-        AuthField(password, { password = it }, "Пароль", password = true)
-        if (error.isNotBlank()) {
+        AuthField(phone, { phone = it.filter { ch -> ch.isDigit() || ch == '+' }.take(16); error = "" }, "Номер телефона", KeyboardType.Phone)
+        AnimatedVisibility(visible = error.isNotBlank(), enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
             Text(error, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
         }
         Spacer(Modifier.height(22.dp))
@@ -129,16 +165,16 @@ private fun AuthScreen(register: Boolean, onSwitch: () -> Unit, onContinue: () -
             onClick = {
                 error = when {
                     register && nickname.isBlank() -> "Введи имя пользователя"
-                    email.isBlank() -> "Введи электронную почту"
-                    password.length < 6 -> "Пароль должен содержать минимум 6 символов"
-                    else -> "Это пока демонстрация. Реальная регистрация будет подключена следующим этапом."
+                    phone.filter { it.isDigit() }.length < 10 -> "Проверь номер телефона"
+                    else -> ""
                 }
+                if (error.isBlank()) onContinue(phone, nickname)
             },
             modifier = Modifier.fillMaxWidth().height(54.dp),
             shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Red)
         ) {
-            Text(if (register) "Создать аккаунт" else "Войти", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text("Получить код по SMS", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(17.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
@@ -151,9 +187,42 @@ private fun AuthScreen(register: Boolean, onSwitch: () -> Unit, onContinue: () -
         }
         Spacer(Modifier.height(30.dp))
         Text(
-            "ПРЕДВАРИТЕЛЬНЫЙ ИНТЕРФЕЙС • АККАУНТЫ ЕЩЁ НЕ ПОДКЛЮЧЕНЫ",
+            "SMS-АВТОРИЗАЦИЯ • ПОКА ДЕМО-ИНТЕРФЕЙС",
             color = Muted, fontSize = 9.sp, letterSpacing = 0.7.sp
         )
+    }
+}
+
+@Composable
+private fun VerifyScreen(phone: String, onBack: () -> Unit, onConfirm: () -> Unit) {
+    var code by remember { mutableStateOf("") }
+    var info by remember { mutableStateOf("") }
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 25.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("‹  Назад", color = Red, fontSize = 15.sp, modifier = Modifier.clickable(onClick = onBack))
+        Spacer(Modifier.height(34.dp))
+        BrandHeader()
+        Spacer(Modifier.height(42.dp))
+        Text("Подтверждение", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Text("Введи код из SMS для номера $phone", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp, bottom = 24.dp))
+        AuthField(code, { code = it.filter(Char::isDigit).take(6); info = "" }, "Код из SMS", KeyboardType.Number)
+        if (info.isNotBlank()) Text(info, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+        Spacer(Modifier.height(22.dp))
+        Button(
+            onClick = {
+                info = if (code.length != 6) "Введи шестизначный код" else
+                    "Подтверждение SMS пока не подключено. Следующий этап — Firebase."
+            },
+            modifier = Modifier.fillMaxWidth().height(54.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Red)
+        ) {
+            Text("Подтвердить номер", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(16.dp))
+        Text("Код пока не отправляется: это интерфейс до подключения Firebase.", color = Muted, fontSize = 11.sp)
     }
 }
 
