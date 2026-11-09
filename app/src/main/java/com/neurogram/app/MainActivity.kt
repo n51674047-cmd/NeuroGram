@@ -71,14 +71,17 @@ class MainActivity : ComponentActivity() {
 private data class ChatItem(
     val id: String,
     val title: String,
-    val lastMessage: String
+    val lastMessage: String,
+    val otherUid: String
 )
 
 private data class MessageItem(
     val id: String,
     val senderId: String,
     val senderName: String,
-    val text: String
+    val text: String,
+    val delivered: Boolean,
+    val read: Boolean
 )
 
 @Composable
@@ -103,6 +106,7 @@ private fun NeuroGramApp() {
     var loading by remember { mutableStateOf(false) }
     var selectedChatId by remember { mutableStateOf("") }
     var selectedChatTitle by remember { mutableStateOf("") }
+    var selectedOtherUid by remember { mutableStateOf("") }
     var chats by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
@@ -133,7 +137,7 @@ private fun NeuroGramApp() {
                             val otherId = members.firstOrNull { it?.toString() != uid }?.toString()
                             val names = doc.get("memberNames") as? Map<*, *> ?: emptyMap<Any, Any>()
                             val title = names[otherId]?.toString() ?: "Диалог NeuroGram"
-                            ChatItem(doc.id, title, doc.getString("lastMessage") ?: "Нет сообщений")
+                            ChatItem(doc.id, title, doc.getString("lastMessage") ?: "Нет сообщений", otherId ?: "")
                         }?.sortedByDescending { it.id } ?: emptyList()
                     }
                 }
@@ -243,6 +247,7 @@ private fun NeuroGramApp() {
                         error = ""
                         selectedChatId = chatId
                         selectedChatTitle = otherName
+                        selectedOtherUid = otherId
                         page = "chat"
                     }
                     .addOnFailureListener { loading = false; error = "Не удалось создать чат: ${it.localizedMessage}" }
@@ -254,6 +259,7 @@ private fun NeuroGramApp() {
         if (drawerState.isOpen) drawerScope.launch { drawerState.close() }
         else page = when (page) {
             "chat", "profile" -> "chats"
+            "user_profile" -> previousPage
             "privacy", "notifications", "chat_settings", "appearance", "about" -> previousPage
             "chats" -> "chats"
             else -> "chats"
@@ -334,6 +340,7 @@ private fun NeuroGramApp() {
                         onOpenChat = { chat ->
                             selectedChatId = chat.id
                             selectedChatTitle = chat.title
+                            selectedOtherUid = chat.otherUid
                             page = "chat"
                         },
                         onProfile = { page = "profile" },
@@ -343,9 +350,14 @@ private fun NeuroGramApp() {
                         SettingsScreen(section = target, onBack = { page = previousPage })
                     "chat" -> ChatScreen(
                         chatId = selectedChatId, title = selectedChatTitle,
-                        myUid = currentUser?.uid ?: "",
+                        myUid = currentUser?.uid ?: "", otherUid = selectedOtherUid,
                         myName = nickname.ifBlank { currentUser?.email?.substringBefore("@") ?: "Я" },
-                        db = db, onBack = { page = "chats" }
+                        db = db, onBack = { page = "chats" },
+                        onViewProfile = { previousPage = "chat"; page = "user_profile" }
+                    )
+                    "user_profile" -> PublicProfileScreen(
+                        uid = selectedOtherUid, db = db,
+                        onBack = { page = previousPage }
                     )
                     else -> ProfileScreen(
                         uid = currentUser?.uid ?: "",
@@ -387,7 +399,7 @@ private fun AuthScreen(
     nickname: String, onNickname: (String) -> Unit,
     error: String, loading: Boolean, onSubmit: () -> Unit, onSwitch: () -> Unit
 ) {
-    Column(Modifier.fillMaxSize().background(Bg).padding(horizontal = 25.dp), verticalArrangement = Arrangement.Center) {
+    Column(Modifier.fillMaxSize().background(Bg).imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 25.dp), verticalArrangement = Arrangement.Center) {
         BrandHeader()
         Spacer(Modifier.height(48.dp))
         Text(if (register) "Создать аккаунт" else "С возвращением", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.Bold)
@@ -518,8 +530,8 @@ private fun ChatList(
 
 @Composable
 private fun ChatScreen(
-    chatId: String, title: String, myUid: String, myName: String,
-    db: FirebaseFirestore, onBack: () -> Unit
+    chatId: String, title: String, myUid: String, otherUid: String, myName: String,
+    db: FirebaseFirestore, onBack: () -> Unit, onViewProfile: () -> Unit
 ) {
     var messages by remember(chatId) { mutableStateOf<List<MessageItem>>(emptyList()) }
     var draft by remember(chatId) { mutableStateOf("") }
@@ -531,28 +543,46 @@ private fun ChatScreen(
             .orderBy("createdAt")
             .addSnapshotListener { snapshot, exception ->
                 if (exception != null) error = "Не удалось загрузить сообщения: ${exception.localizedMessage}"
-                else messages = snapshot?.documents?.map { doc ->
-                    MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "")
-                } ?: emptyList()
+                else {
+                    val docs = snapshot?.documents ?: emptyList()
+                    messages = docs.map { doc ->
+                        MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "", doc.getTimestamp("deliveredAt") != null, doc.getTimestamp("readAt") != null)
+                    }
+                    val batch = db.batch()
+                    var changed = false
+                    docs.filter { it.getString("senderId") != myUid && it.getTimestamp("deliveredAt") == null }.forEach { doc ->
+                        batch.update(doc.reference, "deliveredAt", FieldValue.serverTimestamp()); changed = true
+                    }
+                    if (changed) batch.commit()
+                }
             }
         onDispose { listener.remove() }
     }
 
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+            val unread = messages.filter { it.senderId != myUid && !it.read }
+            if (unread.isNotEmpty()) {
+                val batch = db.batch()
+                unread.forEach { message -> batch.update(db.collection("chats").document(chatId).collection("messages").document(message.id), "readAt", FieldValue.serverTimestamp()) }
+                batch.commit()
+            }
+        }
     }
 
-    Column(Modifier.fillMaxSize().background(Bg).padding(horizontal = 12.dp, vertical = 10.dp)) {
+    Column(Modifier.fillMaxSize().background(Bg).imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(16.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("‹", color = Red, fontSize = 30.sp, modifier = Modifier.clickable(onClick = onBack).padding(horizontal = 8.dp))
             Box(Modifier.size(42.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
                 Text(title.take(1).uppercase(), color = Red, fontWeight = FontWeight.Bold, fontSize = 18.sp)
             }
             Spacer(Modifier.width(11.dp))
-            Column {
+            Column(Modifier.weight(1f).clickable(onClick = onViewProfile)) {
                 Text(title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Text("был(а) недавно", color = Muted, fontSize = 11.sp)
+                Text("Открыть профиль", color = Muted, fontSize = 11.sp)
             }
+            Text("⋮", color = Red, fontSize = 22.sp, modifier = Modifier.clickable(onClick = onViewProfile).padding(horizontal = 8.dp))
         }
         if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp)
         LazyColumn(
@@ -573,6 +603,11 @@ private fun ChatScreen(
                         modifier = Modifier.widthIn(max = 290.dp)
                             .background(if (mine) Red else Panel, RoundedCornerShape(17.dp))
                             .padding(horizontal = 14.dp, vertical = 10.dp)
+                    )
+                    if (mine) Text(
+                        when { message.read -> "✓✓"; message.delivered -> "✓✓"; else -> "✓" },
+                        color = if (message.read) Color(0xFF64B5F6) else Muted,
+                        fontSize = 11.sp, modifier = Modifier.padding(end = 8.dp, top = 2.dp)
                     )
                 }
             }
@@ -597,7 +632,8 @@ private fun ChatScreen(
                         val chatRef = db.collection("chats").document(chatId)
                         chatRef.collection("messages").add(mapOf(
                             "senderId" to myUid, "senderName" to myName,
-                            "text" to text, "createdAt" to FieldValue.serverTimestamp()
+                            "text" to text, "createdAt" to FieldValue.serverTimestamp(),
+                            "deliveredAt" to null, "readAt" to null
                         )).addOnFailureListener { error = "Не отправлено: ${it.localizedMessage}" }
                         chatRef.update("lastMessage", text, "updatedAt", FieldValue.serverTimestamp())
                     }
