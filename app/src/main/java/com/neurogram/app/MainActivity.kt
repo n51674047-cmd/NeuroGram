@@ -564,9 +564,49 @@ private fun ProfileScreen(email: String, onBack: () -> Unit, onSettings: () -> U
 
 
 @Composable
+private fun SettingToggleRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(description, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
 private fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE) }
+    val settingDefaults = mapOf(
+        "privacy_online" to true,
+        "privacy_read_receipts" to true,
+        "privacy_photo" to true,
+        "privacy_phone" to false,
+        "notify_enabled" to true,
+        "notify_preview" to true,
+        "notify_sound" to true,
+        "notify_vibration" to true,
+        "chat_enter_send" to false,
+        "chat_media_auto" to false
+    )
+    val options = remember {
+        androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply {
+            settingDefaults.forEach { (key, default) -> put(key, prefs.getBoolean(key, default)) }
+        }
+    }
+    fun setOption(key: String, value: Boolean) {
+        options[key] = value
+        prefs.edit().putBoolean(key, value).apply()
+    }
     fun saveTheme(value: Boolean) {
         appDarkTheme = value
         prefs.edit().putBoolean("dark_theme", value).apply()
@@ -579,29 +619,64 @@ private fun SettingsScreen(onBack: () -> Unit) {
         Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
         Spacer(Modifier.height(24.dp))
         Text("Настройки", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-        Text("Настрой NeuroGram под себя", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 5.dp, bottom = 22.dp))
+        Text("Управление аккаунтом и приложением", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 5.dp, bottom = 22.dp))
+
         Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
-            Text("ОФОРМЛЕНИЕ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            Spacer(Modifier.height(14.dp))
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(if (appDarkTheme) "Тёмная тема" else "Светлая тема", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Выбери удобное оформление приложения", color = Muted, fontSize = 12.sp)
-                }
-                Switch(checked = appDarkTheme, onCheckedChange = { saveTheme(it) })
-            }
-            Spacer(Modifier.height(18.dp))
-        }
-        Spacer(Modifier.height(15.dp))
-        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
-            Text("ЧАТЫ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Text("АККАУНТ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             Spacer(Modifier.height(12.dp))
-            Text("Размер текста сообщений", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("Профиль и данные аккаунта", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text("Изменение имени, username и фотографии профиля появится в следующих обновлениях.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        Spacer(Modifier.height(14.dp))
+
+        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
+            Text("ПРИВАТНОСТЬ И БЕЗОПАСНОСТЬ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(Modifier.height(8.dp))
+            SettingToggleRow("Показывать статус в сети", "Видимость статуса активности", options["privacy_online"] == true) { setOption("privacy_online", it) }
+            SettingToggleRow("Отчёты о прочтении", "Разрешить отметки о прочтении сообщений", options["privacy_read_receipts"] == true) { setOption("privacy_read_receipts", it) }
+            SettingToggleRow("Фото профиля всем", "Разрешить другим пользователям видеть фото", options["privacy_photo"] == true) { setOption("privacy_photo", it) }
+            SettingToggleRow("Разрешить поиск по телефону", "Поиск аккаунта по номеру телефона", options["privacy_phone"] == true) { setOption("privacy_phone", it) }
+            Text("Параметры приватности пока сохраняются в настройках устройства; серверное применение появится отдельно.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+        }
+        Spacer(Modifier.height(14.dp))
+
+        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
+            Text("УВЕДОМЛЕНИЯ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(Modifier.height(8.dp))
+            SettingToggleRow("Уведомления", "Общий переключатель уведомлений", options["notify_enabled"] == true) { setOption("notify_enabled", it) }
+            SettingToggleRow("Предпросмотр сообщений", "Показывать текст в уведомлениях", options["notify_preview"] == true) { setOption("notify_preview", it) }
+            SettingToggleRow("Звук", "Звуковой сигнал новых сообщений", options["notify_sound"] == true) { setOption("notify_sound", it) }
+            SettingToggleRow("Вибрация", "Вибрация при новых сообщениях", options["notify_vibration"] == true) { setOption("notify_vibration", it) }
+            Text("Настройки уведомлений будут подключены к системе доставки сообщений в одном из следующих обновлений.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+        }
+        Spacer(Modifier.height(14.dp))
+
+        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
+            Text("ЧАТЫ И ДАННЫЕ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(Modifier.height(8.dp))
+            SettingToggleRow("Отправка клавишей Enter", "Отправлять сообщение нажатием Enter", options["chat_enter_send"] == true) { setOption("chat_enter_send", it) }
+            SettingToggleRow("Автозагрузка медиа", "Автоматически загружать фото и видео", options["chat_media_auto"] == true) { setOption("chat_media_auto", it) }
+            Spacer(Modifier.height(8.dp))
+            Text("Размер текста сообщений", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Text("Сделай текст компактнее или крупнее", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
             Slider(value = appMessageScale, onValueChange = { saveScale(it) }, valueRange = 0.85f..1.3f, steps = 8)
             Text(when { appMessageScale < 0.98f -> "Маленький"; appMessageScale > 1.12f -> "Крупный"; else -> "Стандартный" }, color = Red, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
-        Spacer(Modifier.height(15.dp))
+        Spacer(Modifier.height(14.dp))
+
+        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
+            Text("ОФОРМЛЕНИЕ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (appDarkTheme) "Тёмная тема" else "Светлая тема", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Переключение светлого и тёмного режима", color = Muted, fontSize = 12.sp)
+                }
+                Switch(checked = appDarkTheme, onCheckedChange = { saveTheme(it) })
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+
         Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
             Text("О ПРИЛОЖЕНИИ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             Spacer(Modifier.height(12.dp))
