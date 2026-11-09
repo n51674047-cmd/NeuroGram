@@ -111,6 +111,15 @@ private fun NeuroGramApp() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
 
+    // After opening an authenticated session, always land on the chat list
+    // with the navigation/settings drawer closed.
+    LaunchedEffect(currentUser?.uid) {
+        if (currentUser != null) {
+            page = "chats"
+            drawerState.close()
+        }
+    }
+
     DisposableEffect(auth) {
         val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             currentUser = firebaseAuth.currentUser
