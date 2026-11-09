@@ -32,7 +32,7 @@ function sendCode(email) {
     if (previous.lastSentAt && now - previous.lastSentAt < 60000) {
       return output(false, "Новый код можно запросить через " + Math.ceil((60000 - (now - previous.lastSentAt)) / 1000) + " сек.");
     }
-    code = ("0000" + Math.floor(Math.random() * 10000)).slice(-4);
+    code = ("0000" + (parseInt(hash(Utilities.getUuid() + Date.now() + pepper).slice(0, 8), 16) % 10000)).slice(-4);
     props.setProperty(key, JSON.stringify({
       codeHash: hash(email + "|" + code + "|" + pepper),
       expiresAt: now + 10 * 60 * 1000,
