@@ -87,24 +87,29 @@ private fun NeuroGramApp() {
         onDispose { auth.removeAuthStateListener(listener) }
     }
 
-    LaunchedEffect(currentUser?.uid) {
-        val uid = currentUser?.uid ?: return@LaunchedEffect
-        var registration: ListenerRegistration? = null
-        registration = db.collection("chats")
-            .whereArrayContains("members", uid)
-            .addSnapshotListener { snapshot, exception ->
-                if (exception != null) {
-                    error = "Не удалось загрузить чаты: ${exception.localizedMessage}"
-                    return@addSnapshotListener
+    DisposableEffect(currentUser?.uid) {
+        val uid = currentUser?.uid
+        if (uid == null) {
+            chats = emptyList()
+            onDispose { }
+        } else {
+            val registration = db.collection("chats")
+                .whereArrayContains("members", uid)
+                .addSnapshotListener { snapshot, exception ->
+                    if (exception != null) {
+                        error = "Не удалось загрузить чаты: ${exception.localizedMessage}"
+                    } else {
+                        chats = snapshot?.documents?.map { doc ->
+                            val members = doc.get("members") as? List<*> ?: emptyList<Any>()
+                            val otherId = members.firstOrNull { it?.toString() != uid }?.toString()
+                            val names = doc.get("memberNames") as? Map<*, *> ?: emptyMap<Any, Any>()
+                            val title = names[otherId]?.toString() ?: "Диалог NeuroGram"
+                            ChatItem(doc.id, title, doc.getString("lastMessage") ?: "Нет сообщений")
+                        }?.sortedByDescending { it.id } ?: emptyList()
+                    }
                 }
-                chats = snapshot?.documents?.map { doc ->
-                    val names = doc.get("memberNames") as? Map<*, *> ?: emptyMap<Any, Any>()
-                    val title = names[uid]?.toString() ?: "Диалог NeuroGram"
-                    ChatItem(doc.id, title, doc.getString("lastMessage") ?: "Нет сообщений")
-                }?.sortedByDescending { it.id } ?: emptyList()
-            }
-        kotlinx.coroutines.awaitCancellation()
-        registration?.remove()
+            onDispose { registration.remove() }
+        }
     }
 
     fun saveProfile(userId: String, userEmail: String, displayName: String, onDone: () -> Unit) {
