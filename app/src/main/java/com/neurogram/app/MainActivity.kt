@@ -399,7 +399,7 @@ private fun AuthScreen(
     nickname: String, onNickname: (String) -> Unit,
     error: String, loading: Boolean, onSubmit: () -> Unit, onSwitch: () -> Unit
 ) {
-    Column(Modifier.fillMaxSize().background(Bg).imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 25.dp), verticalArrangement = Arrangement.Center) {
+    Column(Modifier.fillMaxSize().background(Bg).statusBarsPadding().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 25.dp), verticalArrangement = Arrangement.Center) {
         BrandHeader()
         Spacer(Modifier.height(48.dp))
         Text(if (register) "Создать аккаунт" else "С возвращением", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.Bold)
@@ -452,7 +452,7 @@ private fun ChatList(
     var showAdd by remember { mutableStateOf(false) }
     var targetUsername by remember { mutableStateOf("") }
     Box(Modifier.fillMaxSize().background(Bg)) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 18.dp).padding(top = 36.dp, bottom = 18.dp)) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp).padding(top = 12.dp, bottom = 18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(42.dp).background(Panel, RoundedCornerShape(14.dp)).clickable(onClick = onMenu), contentAlignment = Alignment.Center) {
                     Text("☰", color = Red, fontSize = 22.sp)
@@ -506,7 +506,7 @@ private fun ChatList(
         }
         FloatingActionButton(
             onClick = { showAdd = true },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(22.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(22.dp),
             containerColor = Red, contentColor = Color.White, shape = CircleShape
         ) { Text("+", fontSize = 30.sp, fontWeight = FontWeight.Normal) }
     }
@@ -571,7 +571,7 @@ private fun ChatScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Bg).imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
+    Column(Modifier.fillMaxSize().background(Bg).statusBarsPadding().imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(16.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("‹", color = Red, fontSize = 30.sp, modifier = Modifier.clickable(onClick = onBack).padding(horizontal = 8.dp))
             Box(Modifier.size(42.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
