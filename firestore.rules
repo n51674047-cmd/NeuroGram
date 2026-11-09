@@ -36,7 +36,13 @@ service cloud.firestore {
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 5000;
-        allow update, delete: if false;
+        // A recipient may only update delivery/read timestamps on messages
+        // sent by another member. Message text and sender identity stay immutable.
+        allow update: if chatExistsAndUserIsMember()
+          && resource.data.senderId != request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['deliveredAt', 'readAt']);
+        allow delete: if false;
       }
     }
   }
