@@ -647,6 +647,62 @@ private fun ChatScreen(
 }
 
 @Composable
+private fun PublicProfileScreen(uid: String, db: FirebaseFirestore, onBack: () -> Unit) {
+    var username by remember(uid) { mutableStateOf("") }
+    var bio by remember(uid) { mutableStateOf("") }
+    var avatarUrl by remember(uid) { mutableStateOf("") }
+    var loading by remember(uid) { mutableStateOf(true) }
+    var error by remember(uid) { mutableStateOf("") }
+
+    LaunchedEffect(uid) {
+        if (uid.isBlank()) {
+            loading = false
+            error = "Профиль не найден"
+        } else {
+            db.collection("publicProfiles").document(uid).get()
+                .addOnSuccessListener { doc ->
+                    if (doc.exists()) {
+                        username = doc.getString("username") ?: doc.getString("nickname") ?: "Пользователь"
+                        bio = doc.getString("bio") ?: ""
+                        avatarUrl = doc.getString("avatarUrl") ?: ""
+                    } else error = "Профиль не найден"
+                    loading = false
+                }
+                .addOnFailureListener {
+                    error = "Не удалось загрузить профиль: ${it.localizedMessage}"
+                    loading = false
+                }
+        }
+    }
+
+    Column(
+        Modifier.fillMaxSize().background(Bg).statusBarsPadding()
+            .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)
+    ) {
+        Spacer(Modifier.height(18.dp))
+        Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
+        Spacer(Modifier.height(30.dp))
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(112.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
+                if (avatarUrl.isNotBlank()) AsyncImage(
+                    model = avatarUrl, contentDescription = "Аватар пользователя",
+                    modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
+                ) else Text(username.take(1).uppercase().ifBlank { "?" }, color = Red, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        Text("@${username.ifBlank { "Пользователь" }}", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
+        Spacer(Modifier.height(12.dp))
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Red)
+        if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 13.sp)
+        Column(Modifier.fillMaxWidth().padding(top = 18.dp).background(Panel, RoundedCornerShape(18.dp)).padding(18.dp)) {
+            Text("О себе", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(bio.ifBlank { "Пользователь пока не добавил описание." }, color = Ink, fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp))
+        }
+    }
+}
+
+@Composable
 private fun ProfileScreen(
     uid: String, email: String, db: FirebaseFirestore, storage: FirebaseStorage,
     onBack: () -> Unit, onSettings: () -> Unit, onUsernameChanged: (String) -> Unit, onLogout: () -> Unit
