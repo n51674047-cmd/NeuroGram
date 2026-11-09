@@ -1,6 +1,8 @@
 package com.neurogram.app
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -42,6 +44,12 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.storage.FirebaseStorage
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlin.concurrent.thread
+
+private const val VERIFICATION_API_URL = "PASTE_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE"
 
 private var appDarkTheme by mutableStateOf(false)
 private var appMessageScale by mutableFloatStateOf(1f)
@@ -102,6 +110,8 @@ private fun NeuroGramApp() {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var nickname by remember { mutableStateOf("") }
+    var verificationCode by remember { mutableStateOf("") }
+    var awaitingEmailCode by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var selectedChatId by remember { mutableStateOf("") }
@@ -191,21 +201,64 @@ private fun NeuroGramApp() {
             error = "Username: 5–20 символов, латиница, цифры и _"
             return
         }
-        loading = true
-        val task = if (isRegister) auth.createUserWithEmailAndPassword(cleanEmail, password)
-            else auth.signInWithEmailAndPassword(cleanEmail, password)
-        task.addOnSuccessListener { result ->
-            val user = result.user
-            if (user == null) {
-                loading = false
-                error = "Firebase не вернул аккаунт"
-                return@addOnSuccessListener
-            }
-            if (isRegister) {
-                saveProfile(user.uid, cleanEmail, cleanUsername) {
-                    loading = false; error = ""; nickname = cleanUsername; page = "chats"
+        if (isRegister) {
+            if (!awaitingEmailCode) {
+                loading = true
+                postVerificationRequest(JSONObject().put("action", "sendCode").put("email", cleanEmail)) { ok, message ->
+                    loading = false
+                    if (ok) {
+                        awaitingEmailCode = true
+                        error = "Код отправлен на $cleanEmail"
+                    } else error = message
                 }
-            } else {
+                return
+            }
+            if (!Regex("^\\d{4}$").matches(verificationCode)) {
+                error = "Введи четырёхзначный код из письма"
+                return
+            }
+            loading = true
+            val payload = JSONObject().put("action", "verifyAndCreate")
+                .put("email", cleanEmail).put("code", verificationCode).put("password", password)
+            postVerificationRequest(payload) { ok, message ->
+                if (!ok) {
+                    loading = false
+                    error = message
+                } else {
+                    auth.signInWithEmailAndPassword(cleanEmail, password)
+                        .addOnSuccessListener { result ->
+                            val user = result.user
+                            if (user == null) {
+                                loading = false
+                                error = "Аккаунт создан, но не удалось войти. Попробуй войти вручную."
+                            } else {
+                                saveProfile(user.uid, cleanEmail, cleanUsername) {
+                                    loading = false
+                                    error = ""
+                                    nickname = cleanUsername
+                                    verificationCode = ""
+                                    awaitingEmailCode = false
+                                    page = "chats"
+                                }
+                            }
+                        }
+                        .addOnFailureListener {
+                            loading = false
+                            error = "Почта подтверждена и аккаунт создан. Войди вручную: ${it.localizedMessage}"
+                        }
+                }
+            }
+            return
+        }
+        loading = true
+        auth.signInWithEmailAndPassword(cleanEmail, password)
+            .addOnSuccessListener { result ->
+                val user = result.user
+                if (user == null) {
+                    loading = false
+                    error = "Firebase не вернул аккаунт"
+                    return@addOnSuccessListener
+                }
                 db.collection("users").document(user.uid).get().addOnSuccessListener { profile ->
                     val existingUsername = profile.getString("username") ?: profile.getString("nickname")
                         ?: cleanEmail.substringBefore("@")
@@ -213,10 +266,18 @@ private fun NeuroGramApp() {
                         loading = false; error = ""; nickname = existingUsername; page = "chats"
                     }
                 }.addOnFailureListener { loading = false; error = "Не удалось загрузить профиль: ${it.localizedMessage}" }
+            }.addOnFailureListener {
+                loading = false
+                error = it.localizedMessage ?: "Не удалось выполнить вход"
             }
-        }.addOnFailureListener {
+    }
+
+    fun resendVerificationCode() {
+        val cleanEmail = email.trim().lowercase()
+        loading = true
+        postVerificationRequest(JSONObject().put("action", "sendCode").put("email", cleanEmail)) { ok, message ->
             loading = false
-            error = it.localizedMessage ?: "Не удалось выполнить вход"
+            error = if (ok) "Новый код отправлен на $cleanEmail" else message
         }
     }
 
@@ -336,9 +397,15 @@ private fun NeuroGramApp() {
                         password = password, onPassword = { password = it },
                         nickname = nickname, onNickname = { nickname = it },
                         error = error, loading = loading,
+                        verificationCode = verificationCode, onVerificationCode = { verificationCode = it.filter(Char::isDigit).take(4) },
+                        awaitingEmailCode = awaitingEmailCode,
                         onSubmit = { isRegister = target == "register"; submitAuth() },
+                        onResendCode = { resendVerificationCode() },
+                        onCancelCode = { awaitingEmailCode = false; verificationCode = ""; error = "" },
                         onSwitch = {
                             error = ""
+                            awaitingEmailCode = false
+                            verificationCode = ""
                             page = if (target == "register") "login" else "register"
                         }
                     )
@@ -387,6 +454,38 @@ private fun NeuroGramApp() {
     }
 }
 
+private fun postVerificationRequest(payload: JSONObject, callback: (Boolean, String) -> Unit) {
+    if (VERIFICATION_API_URL.startsWith("PASTE_")) {
+        callback(false, "Сервер подтверждения ещё не подключён. Сначала разверни Apps Script и добавь его URL в приложение.")
+        return
+    }
+    thread {
+        var connection: HttpURLConnection? = null
+        try {
+            connection = (URL(VERIFICATION_API_URL).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 20000
+                readTimeout = 30000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            }
+            connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+            val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+            val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val response = JSONObject(responseText.ifBlank { "{}" })
+            val ok = response.optBoolean("ok", false)
+            val message = response.optString("message").ifBlank { if (ok) "Готово" else "Сервер не смог выполнить запрос" }
+            Handler(Looper.getMainLooper()).post { callback(ok, message) }
+        } catch (e: Exception) {
+            Handler(Looper.getMainLooper()).post {
+                callback(false, "Не удалось связаться с сервером подтверждения: ${e.localizedMessage ?: "ошибка сети"}")
+            }
+        } finally {
+            connection?.disconnect()
+        }
+    }
+}
+
 @Composable
 private fun BrandHeader() {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -406,24 +505,32 @@ private fun AuthScreen(
     register: Boolean, email: String, onEmail: (String) -> Unit,
     password: String, onPassword: (String) -> Unit,
     nickname: String, onNickname: (String) -> Unit,
+    verificationCode: String, onVerificationCode: (String) -> Unit,
+    awaitingEmailCode: Boolean, onResendCode: () -> Unit, onCancelCode: () -> Unit,
     error: String, loading: Boolean, onSubmit: () -> Unit, onSwitch: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().background(Bg).statusBarsPadding().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 25.dp), verticalArrangement = Arrangement.Center) {
         BrandHeader()
         Spacer(Modifier.height(48.dp))
-        Text(if (register) "Создать аккаунт" else "С возвращением", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-        Text(if (register) "Присоединяйся к NeuroGram" else "Войди, чтобы продолжить общение", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp, bottom = 25.dp))
-        if (register) {
+        Text(if (register && awaitingEmailCode) "Подтверди почту" else if (register) "Создать аккаунт" else "С возвращением", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.Bold)
+        Text(if (register && awaitingEmailCode) "Мы отправили четырёхзначный код на $email" else if (register) "Присоединяйся к NeuroGram" else "Войди, чтобы продолжить общение", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp, bottom = 25.dp))
+        if (register && !awaitingEmailCode) {
             AuthField(nickname, onNickname, "Username (5–20 символов)")
             Spacer(Modifier.height(12.dp))
         }
         AuthField(email, onEmail, "Электронная почта", KeyboardType.Email)
         Spacer(Modifier.height(12.dp))
         AuthField(password, onPassword, "Пароль", password = true)
+        if (register && awaitingEmailCode) {
+            Spacer(Modifier.height(12.dp))
+            AuthField(verificationCode, onVerificationCode, "Код из письма (4 цифры)", KeyboardType.Number)
+            TextButton(onClick = onResendCode, enabled = !loading) { Text("Отправить код ещё раз", color = Red) }
+            TextButton(onClick = onCancelCode, enabled = !loading) { Text("Изменить данные регистрации", color = Muted) }
+        }
         if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
         Spacer(Modifier.height(22.dp))
         Button(onClick = onSubmit, enabled = !loading, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Red)) {
-            Text(if (loading) "Подождите…" else if (register) "Создать аккаунт" else "Войти", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(if (loading) "Подождите…" else if (register && awaitingEmailCode) "Подтвердить и создать аккаунт" else if (register) "Получить код" else "Войти", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
