@@ -25,6 +25,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
@@ -32,18 +35,25 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 
-private val Bg = Color(0xFFF2F4F7)
-private val Panel = Color(0xFFFFFFFF)
-private val Red = Color(0xFF3390EC)
-private val Muted = Color(0xFF7D8B99)
-private val Ink = Color(0xFF17212B)
-private val Divider = Color(0xFFE7EBEF)
+private var appDarkTheme by mutableStateOf(false)
+private var appAccentColor by mutableStateOf(0xFF3390ECL)
+private var appMessageScale by mutableFloatStateOf(1f)
+
+private val Bg: Color get() = if (appDarkTheme) Color(0xFF101820) else Color(0xFFF2F4F7)
+private val Panel: Color get() = if (appDarkTheme) Color(0xFF1B2733) else Color.White
+private val Red: Color get() = Color(appAccentColor)
+private val Muted: Color get() = if (appDarkTheme) Color(0xFF9AAAB8) else Color(0xFF7D8B99)
+private val Ink: Color get() = if (appDarkTheme) Color(0xFFEAF1F7) else Color(0xFF17212B)
+private val Divider: Color get() = if (appDarkTheme) Color(0xFF30404D) else Color(0xFFE7EBEF)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(
+            MaterialTheme(colorScheme = if (appDarkTheme) darkColorScheme(
+                background = Bg, surface = Panel, primary = Red,
+                onBackground = Ink, onSurface = Ink
+            ) else lightColorScheme(
                 background = Bg, surface = Panel, primary = Red,
                 onBackground = Ink, onSurface = Ink
             )) { NeuroGramApp() }
@@ -66,6 +76,13 @@ private data class MessageItem(
 
 @Composable
 private fun NeuroGramApp() {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
+        appDarkTheme = prefs.getBoolean("dark_theme", false)
+        appAccentColor = prefs.getLong("accent_color", 0xFF3390ECL)
+        appMessageScale = prefs.getFloat("message_scale", 1f)
+    }
     val auth = remember { FirebaseAuth.getInstance() }
     val db = remember { FirebaseFirestore.getInstance() }
     var currentUser by remember { mutableStateOf(auth.currentUser) }
@@ -258,6 +275,7 @@ private fun NeuroGramApp() {
                     },
                     onProfile = { page = "profile" }
                 )
+                "settings" -> SettingsScreen(onBack = { page = "profile" })
                 "chat" -> ChatScreen(
                     chatId = selectedChatId,
                     title = selectedChatTitle,
@@ -269,6 +287,7 @@ private fun NeuroGramApp() {
                 else -> ProfileScreen(
                     email = currentUser?.email ?: "",
                     onBack = { page = "chats" },
+                    onSettings = { page = "settings" },
                     onLogout = {
                         auth.signOut()
                         email = ""
@@ -481,7 +500,7 @@ private fun ChatScreen(
                         modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp)
                     )
                     Text(
-                        message.text, color = if (mine) Color.White else Ink, fontSize = 14.sp,
+                        message.text, color = if (mine) Color.White else Ink, fontSize = 14.sp * appMessageScale,
                         modifier = Modifier.widthIn(max = 290.dp)
                             .background(if (mine) Red else Panel, RoundedCornerShape(17.dp))
                             .padding(horizontal = 14.dp, vertical = 10.dp)
@@ -523,7 +542,7 @@ private fun ChatScreen(
 }
 
 @Composable
-private fun ProfileScreen(email: String, onBack: () -> Unit, onLogout: () -> Unit) {
+private fun ProfileScreen(email: String, onBack: () -> Unit, onSettings: () -> Unit, onLogout: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Bg).padding(20.dp)) {
         Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
         Spacer(Modifier.height(35.dp))
@@ -534,9 +553,85 @@ private fun ProfileScreen(email: String, onBack: () -> Unit, onLogout: () -> Uni
         Text("Профиль", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.Bold)
         Text(email, color = Muted, fontSize = 15.sp, modifier = Modifier.padding(top = 12.dp))
         Spacer(Modifier.height(25.dp))
+        OutlinedButton(onClick = onSettings, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) {
+            Text("⚙  Настройки и оформление", color = Red)
+        }
+        Spacer(Modifier.height(12.dp))
         Button(onClick = onLogout, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Red)) {
             Text("Выйти из аккаунта", color = Color.White)
         }
     }
 }
 
+
+
+@Composable
+private fun SettingsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE) }
+    fun saveTheme(value: Boolean) {
+        appDarkTheme = value
+        prefs.edit().putBoolean("dark_theme", value).apply()
+    }
+    fun saveAccent(value: Long) {
+        appAccentColor = value
+        prefs.edit().putLong("accent_color", value).apply()
+    }
+    fun saveScale(value: Float) {
+        appMessageScale = value
+        prefs.edit().putFloat("message_scale", value).apply()
+    }
+    val accents = listOf(
+        0xFF3390ECL to "Синий", 0xFFE05260L to "Красный",
+        0xFF8B6CEBL to "Фиолетовый", 0xFF22A06BL to "Зелёный",
+        0xFFFF9F43L to "Оранжевый"
+    )
+    Column(Modifier.fillMaxSize().background(Bg).verticalScroll(rememberScrollState()).padding(20.dp)) {
+        Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
+        Spacer(Modifier.height(24.dp))
+        Text("Настройки", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.Bold)
+        Text("Настрой NeuroGram под себя", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 5.dp, bottom = 22.dp))
+        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
+            Text("ОФОРМЛЕНИЕ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Тёмная тема", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Переключение светлого и тёмного оформления", color = Muted, fontSize = 12.sp)
+                }
+                Switch(checked = appDarkTheme, onCheckedChange = { saveTheme(it) })
+            }
+            Spacer(Modifier.height(18.dp))
+            Text("Цвет интерфейса", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("Цвет кнопок и основных акцентов", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+            Spacer(Modifier.height(13.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                accents.forEach { (color, label) ->
+                    Column(Modifier.weight(1f).clickable { saveAccent(color) }, horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(Modifier.size(32.dp).background(Color(color), CircleShape), contentAlignment = Alignment.Center) {
+                            if (appAccentColor == color) Text("✓", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                        Text(label, color = Muted, fontSize = 9.sp, modifier = Modifier.padding(top = 5.dp))
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(15.dp))
+        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
+            Text("ЧАТЫ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(Modifier.height(12.dp))
+            Text("Размер текста сообщений", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("Сделай текст компактнее или крупнее", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+            Slider(value = appMessageScale, onValueChange = { saveScale(it) }, valueRange = 0.85f..1.3f, steps = 8)
+            Text(when { appMessageScale < 0.98f -> "Маленький"; appMessageScale > 1.12f -> "Крупный"; else -> "Стандартный" }, color = Red, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(Modifier.height(15.dp))
+        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
+            Text("О ПРИЛОЖЕНИИ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(Modifier.height(12.dp))
+            Text("NeuroGram", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("Версия 1.0 • Настройки сохраняются на этом устройстве", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        Spacer(Modifier.height(28.dp))
+    }
+}
