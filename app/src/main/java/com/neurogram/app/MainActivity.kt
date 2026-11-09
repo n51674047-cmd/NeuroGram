@@ -52,6 +52,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private fun normalizeRussianPhone(input: String): String? {
+    val digits = input.filter { it.isDigit() }
+    val russianDigits = when {
+        digits.length == 10 -> "7" + digits
+        digits.length == 11 && digits.startsWith("8") -> "7" + digits.drop(1)
+        digits.length == 11 && digits.startsWith("7") -> digits
+        else -> return null
+    }
+    return "+" + russianDigits
+}
 private data class ChatPreview(val name: String, val message: String, val color: Color)
 private val demoChats = listOf(
     ChatPreview("Александр", "Окей, договорились", Color(0xFF9B5DE5)),
@@ -127,17 +137,19 @@ private fun NeuroGramApp(activity: ComponentActivity) {
 
     fun requestCode() {
         error = ""
-        if (phone.filter { it.isDigit() }.length < 10 || !phone.startsWith("+")) {
-            error = "Введи номер в международном формате, например +7…"
+        val normalizedPhone = normalizeRussianPhone(phone)
+        if (normalizedPhone == null) {
+            error = "Введи российский номер: 10 цифр или 11 цифр, начиная с 7 или 8"
             return
         }
+        phone = normalizedPhone
         if (isRegister && nickname.isBlank()) {
             error = "Введи имя пользователя"
             return
         }
         loading = true
         val options = PhoneAuthOptions.newBuilder(auth)
-            .setPhoneNumber(phone.trim())
+            .setPhoneNumber(normalizedPhone)
             .setTimeout(60L, TimeUnit.SECONDS)
             .setActivity(activity)
             .setCallbacks(callbacks)
@@ -232,7 +244,7 @@ private fun AuthScreen(
             AuthField(nickname, onNickname, "Имя пользователя")
             Spacer(Modifier.height(12.dp))
         }
-        AuthField(phone, onPhone, "Номер телефона (+7…)", KeyboardType.Phone)
+        AuthField(phone, onPhone, "Российский номер телефона", KeyboardType.Phone)
         if (error.isNotBlank()) Text(error, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
         Spacer(Modifier.height(22.dp))
         Button(onClick = onContinue, enabled = !loading, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Red)) {
