@@ -1,8 +1,11 @@
 package com.neurogram.app
 
 import android.os.Bundle
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -23,6 +26,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -36,6 +41,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.storage.FirebaseStorage
 
 private var appDarkTheme by mutableStateOf(false)
 private var appMessageScale by mutableFloatStateOf(1f)
@@ -85,8 +91,10 @@ private fun NeuroGramApp() {
     }
     val auth = remember { FirebaseAuth.getInstance() }
     val db = remember { FirebaseFirestore.getInstance() }
+    val storage = remember { FirebaseStorage.getInstance() }
     var currentUser by remember { mutableStateOf(auth.currentUser) }
     var page by remember { mutableStateOf(if (auth.currentUser != null) "chats" else "login") }
+    var previousPage by remember { mutableStateOf("chats") }
     var isRegister by remember { mutableStateOf(false) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -242,6 +250,16 @@ private fun NeuroGramApp() {
             .addOnFailureListener { loading = false; error = "Ошибка поиска: ${it.localizedMessage}" }
     }
 
+    BackHandler(enabled = currentUser != null) {
+        if (drawerState.isOpen) drawerScope.launch { drawerState.close() }
+        else page = when (page) {
+            "chat", "profile" -> "chats"
+            "privacy", "notifications", "chat_settings", "appearance", "about" -> previousPage
+            "chats" -> "chats"
+            else -> "chats"
+        }
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = currentUser != null,
@@ -269,10 +287,16 @@ private fun NeuroGramApp() {
                         icon = { Text("●", color = Red, fontSize = 19.sp) }, modifier = Modifier.padding(horizontal = 10.dp))
                     HorizontalDivider(color = Divider, modifier = Modifier.padding(vertical = 10.dp))
                     Text("НАСТРОЙКИ", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 6.dp))
-                    listOf("Приватность и безопасность", "Уведомления", "Чаты и данные", "Оформление", "О приложении").forEach { item ->
-                        NavigationDrawerItem(label = { Text(item) }, selected = page == "settings",
-                            onClick = { page = "settings"; drawerScope.launch { drawerState.close() } },
-                            icon = { Text(when(item) { "Приватность и безопасность" -> "◈"; "Уведомления" -> "♢"; "Чаты и данные" -> "▣"; "Оформление" -> "◐"; else -> "ⓘ" }, color = Red, fontSize = 18.sp) },
+                    listOf(
+                        "Приватность и безопасность" to "privacy",
+                        "Уведомления" to "notifications",
+                        "Чаты и данные" to "chat_settings",
+                        "Оформление" to "appearance",
+                        "О приложении" to "about"
+                    ).forEach { (item, destination) ->
+                        NavigationDrawerItem(label = { Text(item) }, selected = page == destination,
+                            onClick = { previousPage = "chats"; page = destination; drawerScope.launch { drawerState.close() } },
+                            icon = { Text(when(destination) { "privacy" -> "◈"; "notifications" -> "♢"; "chat_settings" -> "▣"; "appearance" -> "◐"; else -> "ⓘ" }, color = Red, fontSize = 18.sp) },
                             modifier = Modifier.padding(horizontal = 10.dp))
                     }
                     Spacer(Modifier.weight(1f))
@@ -315,7 +339,8 @@ private fun NeuroGramApp() {
                         onProfile = { page = "profile" },
                         onMenu = { drawerScope.launch { drawerState.open() } }
                     )
-                    "settings" -> SettingsScreen(onBack = { page = "profile" })
+                    "privacy", "notifications", "chat_settings", "appearance", "about" ->
+                        SettingsScreen(section = target, onBack = { page = previousPage })
                     "chat" -> ChatScreen(
                         chatId = selectedChatId, title = selectedChatTitle,
                         myUid = currentUser?.uid ?: "",
@@ -323,9 +348,12 @@ private fun NeuroGramApp() {
                         db = db, onBack = { page = "chats" }
                     )
                     else -> ProfileScreen(
+                        uid = currentUser?.uid ?: "",
                         email = currentUser?.email ?: "",
+                        db = db, storage = storage,
                         onBack = { page = "chats" },
-                        onSettings = { page = "settings" },
+                        onSettings = { previousPage = "profile"; page = "privacy" },
+                        onUsernameChanged = { nickname = it },
                         onLogout = {
                             auth.signOut()
                             email = ""; password = ""; nickname = ""; error = ""
@@ -583,40 +611,122 @@ private fun ChatScreen(
 }
 
 @Composable
-private fun ProfileScreen(email: String, onBack: () -> Unit, onSettings: () -> Unit, onLogout: () -> Unit) {
-    Column(Modifier.fillMaxSize().background(Bg).padding(20.dp)) {
-        Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
-        Spacer(Modifier.height(35.dp))
-        Box(Modifier.size(76.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
-            Text("●", color = Red, fontSize = 30.sp)
-        }
-        Spacer(Modifier.height(20.dp))
-        Text("Профиль", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-        Text(email, color = Muted, fontSize = 15.sp, modifier = Modifier.padding(top = 12.dp))
-        Spacer(Modifier.height(25.dp))
-        OutlinedButton(onClick = onSettings, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) {
-            Text("⚙  Настройки и оформление", color = Red)
-        }
-        Spacer(Modifier.height(12.dp))
-        Button(onClick = onLogout, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Red)) {
-            Text("Выйти из аккаунта", color = Color.White)
+private fun ProfileScreen(
+    uid: String, email: String, db: FirebaseFirestore, storage: FirebaseStorage,
+    onBack: () -> Unit, onSettings: () -> Unit, onUsernameChanged: (String) -> Unit, onLogout: () -> Unit
+) {
+    var username by remember(uid) { mutableStateOf("") }
+    var bio by remember(uid) { mutableStateOf("") }
+    var avatarUrl by remember(uid) { mutableStateOf("") }
+    var editUsername by remember(uid) { mutableStateOf("") }
+    var editBio by remember(uid) { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf("") }
+    var showEdit by remember { mutableStateOf(false) }
+
+    LaunchedEffect(uid) {
+        if (uid.isNotBlank()) db.collection("users").document(uid).get().addOnSuccessListener { doc ->
+            username = doc.getString("username") ?: doc.getString("nickname") ?: ""
+            bio = doc.getString("bio") ?: ""
+            avatarUrl = doc.getString("avatarUrl") ?: ""
+            editUsername = username
+            editBio = bio
+        }.addOnFailureListener { message = "Не удалось загрузить профиль: ${it.localizedMessage}" }
+    }
+
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) {
+            loading = true
+            val ref = storage.reference.child("avatars/$uid/profile_${System.currentTimeMillis()}.jpg")
+            ref.putFile(uri).continueWithTask { task ->
+                if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
+                ref.downloadUrl
+            }.addOnSuccessListener { download ->
+                val url = download.toString()
+                val data = mapOf("avatarUrl" to url)
+                db.collection("users").document(uid).set(data, com.google.firebase.firestore.SetOptions.merge())
+                db.collection("publicProfiles").document(uid).set(data, com.google.firebase.firestore.SetOptions.merge())
+                avatarUrl = url; loading = false; message = "Аватар обновлён"
+            }.addOnFailureListener { loading = false; message = "Не удалось загрузить аватар: ${it.localizedMessage}" }
         }
     }
+
+    fun saveProfileChanges() {
+        val nextUsername = editUsername.trim().removePrefix("@").lowercase()
+        val nextBio = editBio.trim()
+        if (!Regex("^[a-z0-9_]{5,20}$").matches(nextUsername)) { message = "Username: 5–20 символов, латиница, цифры и _"; return }
+        if (nextBio.length > 160) { message = "Описание не должно быть длиннее 160 символов"; return }
+        loading = true
+        val oldUsername = username
+        val newRef = db.collection("usernames").document(nextUsername)
+        db.runTransaction { transaction ->
+            val existing = transaction.get(newRef)
+            if (existing.exists() && existing.getString("uid") != uid) throw IllegalStateException("Этот username уже занят")
+            transaction.set(newRef, mapOf("uid" to uid))
+            if (oldUsername.isNotBlank() && oldUsername != nextUsername) {
+                val oldRef = db.collection("usernames").document(oldUsername)
+                val oldDoc = transaction.get(oldRef)
+                if (oldDoc.exists() && oldDoc.getString("uid") == uid) transaction.delete(oldRef)
+            }
+            val common = mapOf("uid" to uid, "username" to nextUsername, "usernameLower" to nextUsername,
+                "nickname" to nextUsername, "bio" to nextBio, "avatarUrl" to avatarUrl)
+            transaction.set(db.collection("users").document(uid), common, com.google.firebase.firestore.SetOptions.merge())
+            transaction.set(db.collection("publicProfiles").document(uid), common, com.google.firebase.firestore.SetOptions.merge())
+            null
+        }.addOnSuccessListener {
+            username = nextUsername; bio = nextBio; editUsername = nextUsername; editBio = nextBio
+            onUsernameChanged(nextUsername); loading = false; showEdit = false; message = "Профиль сохранён"
+        }.addOnFailureListener { loading = false; message = it.localizedMessage ?: "Не удалось сохранить профиль" }
+    }
+
+    Column(Modifier.fillMaxSize().background(Bg).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+        Spacer(Modifier.height(46.dp))
+        Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
+        Spacer(Modifier.height(34.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(94.dp).background(Color(0xFFDCEEFF), CircleShape).clickable { picker.launch("image/*") }, contentAlignment = Alignment.Center) {
+                if (avatarUrl.isNotBlank()) AsyncImage(model = avatarUrl, contentDescription = "Аватар", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                else Text("＋", color = Red, fontSize = 34.sp)
+            }
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Профиль", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text("Нажми на фото, чтобы поставить аватар", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+            }
+        }
+        Spacer(Modifier.height(22.dp))
+        Text("@${username.ifBlank { "username" }}", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text(email, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
+        Text(bio.ifBlank { "Добавь описание профиля" }, color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 14.dp))
+        Spacer(Modifier.height(20.dp))
+        OutlinedButton(onClick = { editUsername = username; editBio = bio; showEdit = true }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("Изменить профиль", color = Red) }
+        OutlinedButton(onClick = onSettings, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("⚙  Настройки", color = Red) }
+        if (message.isNotBlank()) Text(message, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Red)
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onLogout, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Red)) { Text("Выйти из аккаунта", color = Color.White) }
+        Spacer(Modifier.height(30.dp))
+    }
+    if (showEdit) AlertDialog(
+        onDismissRequest = { if (!loading) showEdit = false },
+        title = { Text("Редактировать профиль", color = Ink) },
+        text = {
+            Column {
+                OutlinedTextField(value = editUsername, onValueChange = { editUsername = it }, label = { Text("Username") }, prefix = { Text("@") }, singleLine = true)
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(value = editBio, onValueChange = { editBio = it.take(160) }, label = { Text("Описание") }, minLines = 3, maxLines = 4)
+                Text("${editBio.length}/160", color = Muted, fontSize = 11.sp, modifier = Modifier.align(Alignment.End))
+            }
+        },
+        confirmButton = { TextButton(onClick = { saveProfileChanges() }, enabled = !loading) { Text("Сохранить", color = Red) } },
+        dismissButton = { TextButton(onClick = { showEdit = false }, enabled = !loading) { Text("Отмена", color = Muted) } },
+        containerColor = Panel
+    )
 }
 
-
-
 @Composable
-private fun SettingToggleRow(
-    title: String,
-    description: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+private fun SettingToggleRow(title: String, description: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(end = 12.dp)) {
             Text(title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Text(description, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
@@ -626,106 +736,65 @@ private fun SettingToggleRow(
 }
 
 @Composable
-private fun SettingsScreen(onBack: () -> Unit) {
+private fun SettingsScreen(section: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE) }
-    val settingDefaults = mapOf(
-        "privacy_online" to true,
-        "privacy_read_receipts" to true,
-        "privacy_photo" to true,
-        "privacy_phone" to false,
-        "notify_enabled" to true,
-        "notify_preview" to true,
-        "notify_sound" to true,
-        "notify_vibration" to true,
-        "chat_enter_send" to false,
-        "chat_media_auto" to false
-    )
-    val options = remember {
-        androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply {
-            settingDefaults.forEach { (key, default) -> put(key, prefs.getBoolean(key, default)) }
-        }
+    val defaults = mapOf("privacy_online" to true, "privacy_read_receipts" to true, "privacy_photo" to true, "privacy_phone" to false,
+        "notify_enabled" to true, "notify_preview" to true, "notify_sound" to true, "notify_vibration" to true,
+        "chat_enter_send" to false, "chat_media_auto" to false)
+    val options = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply { defaults.forEach { (k, v) -> put(k, prefs.getBoolean(k, v)) } } }
+    fun setOption(key: String, value: Boolean) { options[key] = value; prefs.edit().putBoolean(key, value).apply() }
+    fun saveTheme(value: Boolean) { appDarkTheme = value; prefs.edit().putBoolean("dark_theme", value).apply() }
+    fun saveScale(value: Float) { appMessageScale = value; prefs.edit().putFloat("message_scale", value).apply() }
+    val title = when(section) {
+        "privacy" -> "Приватность и безопасность"
+        "notifications" -> "Уведомления"
+        "chat_settings" -> "Чаты и данные"
+        "appearance" -> "Оформление"
+        else -> "О приложении"
     }
-    fun setOption(key: String, value: Boolean) {
-        options[key] = value
-        prefs.edit().putBoolean(key, value).apply()
-    }
-    fun saveTheme(value: Boolean) {
-        appDarkTheme = value
-        prefs.edit().putBoolean("dark_theme", value).apply()
-    }
-    fun saveScale(value: Float) {
-        appMessageScale = value
-        prefs.edit().putFloat("message_scale", value).apply()
-    }
-    Column(Modifier.fillMaxSize().background(Bg).verticalScroll(rememberScrollState()).padding(20.dp)) {
+    Column(Modifier.fillMaxSize().background(Bg).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+        Spacer(Modifier.height(46.dp))
         Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
-        Spacer(Modifier.height(24.dp))
-        Text("Настройки", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-        Text("Управление аккаунтом и приложением", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 5.dp, bottom = 22.dp))
-
-        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
-            Text("АККАУНТ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            Spacer(Modifier.height(12.dp))
-            Text("Профиль и данные аккаунта", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text("Изменение имени, username и фотографии профиля появится в следующих обновлениях.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-        }
-        Spacer(Modifier.height(14.dp))
-
-        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
-            Text("ПРИВАТНОСТЬ И БЕЗОПАСНОСТЬ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            Spacer(Modifier.height(8.dp))
-            SettingToggleRow("Показывать статус в сети", "Видимость статуса активности", options["privacy_online"] == true) { setOption("privacy_online", it) }
-            SettingToggleRow("Отчёты о прочтении", "Разрешить отметки о прочтении сообщений", options["privacy_read_receipts"] == true) { setOption("privacy_read_receipts", it) }
-            SettingToggleRow("Фото профиля всем", "Разрешить другим пользователям видеть фото", options["privacy_photo"] == true) { setOption("privacy_photo", it) }
-            SettingToggleRow("Разрешить поиск по телефону", "Поиск аккаунта по номеру телефона", options["privacy_phone"] == true) { setOption("privacy_phone", it) }
-            Text("Параметры приватности пока сохраняются в настройках устройства; серверное применение появится отдельно.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
-        }
-        Spacer(Modifier.height(14.dp))
-
-        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
-            Text("УВЕДОМЛЕНИЯ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            Spacer(Modifier.height(8.dp))
-            SettingToggleRow("Уведомления", "Общий переключатель уведомлений", options["notify_enabled"] == true) { setOption("notify_enabled", it) }
-            SettingToggleRow("Предпросмотр сообщений", "Показывать текст в уведомлениях", options["notify_preview"] == true) { setOption("notify_preview", it) }
-            SettingToggleRow("Звук", "Звуковой сигнал новых сообщений", options["notify_sound"] == true) { setOption("notify_sound", it) }
-            SettingToggleRow("Вибрация", "Вибрация при новых сообщениях", options["notify_vibration"] == true) { setOption("notify_vibration", it) }
-            Text("Настройки уведомлений будут подключены к системе доставки сообщений в одном из следующих обновлений.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
-        }
-        Spacer(Modifier.height(14.dp))
-
-        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
-            Text("ЧАТЫ И ДАННЫЕ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            Spacer(Modifier.height(8.dp))
-            SettingToggleRow("Отправка клавишей Enter", "Отправлять сообщение нажатием Enter", options["chat_enter_send"] == true) { setOption("chat_enter_send", it) }
-            SettingToggleRow("Автозагрузка медиа", "Автоматически загружать фото и видео", options["chat_media_auto"] == true) { setOption("chat_media_auto", it) }
-            Spacer(Modifier.height(8.dp))
-            Text("Размер текста сообщений", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text("Сделай текст компактнее или крупнее", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
-            Slider(value = appMessageScale, onValueChange = { saveScale(it) }, valueRange = 0.85f..1.3f, steps = 8)
-            Text(when { appMessageScale < 0.98f -> "Маленький"; appMessageScale > 1.12f -> "Крупный"; else -> "Стандартный" }, color = Red, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Spacer(Modifier.height(14.dp))
-
-        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
-            Text("ОФОРМЛЕНИЕ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(if (appDarkTheme) "Тёмная тема" else "Светлая тема", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Переключение светлого и тёмного режима", color = Muted, fontSize = 12.sp)
+        Spacer(Modifier.height(28.dp))
+        Text(title, color = Ink, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(20.dp))
+        when(section) {
+            "privacy" -> Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
+                SettingToggleRow("Показывать статус в сети", "Видимость статуса активности", options["privacy_online"] == true) { setOption("privacy_online", it) }
+                SettingToggleRow("Отчёты о прочтении", "Разрешить отметки о прочтении сообщений", options["privacy_read_receipts"] == true) { setOption("privacy_read_receipts", it) }
+                SettingToggleRow("Фото профиля всем", "Разрешить другим пользователям видеть фото", options["privacy_photo"] == true) { setOption("privacy_photo", it) }
+                SettingToggleRow("Разрешить поиск по телефону", "Поиск аккаунта по номеру телефона", options["privacy_phone"] == true) { setOption("privacy_phone", it) }
+                Text("Настройки приватности пока сохраняются локально; серверное применение требует отдельной реализации.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+            "notifications" -> Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
+                SettingToggleRow("Уведомления", "Общий переключатель уведомлений", options["notify_enabled"] == true) { setOption("notify_enabled", it) }
+                SettingToggleRow("Предпросмотр сообщений", "Показывать текст в уведомлениях", options["notify_preview"] == true) { setOption("notify_preview", it) }
+                SettingToggleRow("Звук", "Звуковой сигнал новых сообщений", options["notify_sound"] == true) { setOption("notify_sound", it) }
+                SettingToggleRow("Вибрация", "Вибрация при новых сообщениях", options["notify_vibration"] == true) { setOption("notify_vibration", it) }
+                Text("Реальные push-уведомления будут подключены отдельно.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+            "chat_settings" -> Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
+                SettingToggleRow("Отправка клавишей Enter", "Отправлять сообщение нажатием Enter", options["chat_enter_send"] == true) { setOption("chat_enter_send", it) }
+                SettingToggleRow("Автозагрузка медиа", "Автоматически загружать фото и видео", options["chat_media_auto"] == true) { setOption("chat_media_auto", it) }
+                Text("Размер текста сообщений", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Slider(value = appMessageScale, onValueChange = { saveScale(it) }, valueRange = 0.85f..1.3f, steps = 8)
+                Text(when { appMessageScale < 0.98f -> "Маленький"; appMessageScale > 1.12f -> "Крупный"; else -> "Стандартный" }, color = Red, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            "appearance" -> Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(if (appDarkTheme) "Тёмная тема" else "Светлая тема", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Переключение светлого и тёмного режима", color = Muted, fontSize = 12.sp)
+                    }
+                    Switch(checked = appDarkTheme, onCheckedChange = { saveTheme(it) })
                 }
-                Switch(checked = appDarkTheme, onCheckedChange = { saveTheme(it) })
+            }
+            else -> Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
+                Text("NeuroGram", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("Версия 1.0", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                Text("Мессенджер находится в разработке.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
             }
         }
-        Spacer(Modifier.height(14.dp))
-
-        Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
-            Text("О ПРИЛОЖЕНИИ", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            Spacer(Modifier.height(12.dp))
-            Text("NeuroGram", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text("Версия 1.0 • Настройки сохраняются на этом устройстве", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-        }
-        Spacer(Modifier.height(28.dp))
     }
 }
