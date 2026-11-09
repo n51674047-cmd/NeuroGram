@@ -32,10 +32,12 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 
-private val Bg = Color(0xFF09090D)
-private val Panel = Color(0xFF171720)
-private val Red = Color(0xFFFF334F)
-private val Muted = Color(0xFF92929F)
+private val Bg = Color(0xFFF2F4F7)
+private val Panel = Color(0xFFFFFFFF)
+private val Red = Color(0xFF3390EC)
+private val Muted = Color(0xFF7D8B99)
+private val Ink = Color(0xFF17212B)
+private val Divider = Color(0xFFE7EBEF)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,7 +45,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(
                 background = Bg, surface = Panel, primary = Red,
-                onBackground = Color.White, onSurface = Color.White
+                onBackground = Ink, onSurface = Ink
             )) { NeuroGramApp() }
         }
     }
@@ -284,13 +286,13 @@ private fun NeuroGramApp() {
 @Composable
 private fun BrandHeader() {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(46.dp).background(Red, RoundedCornerShape(15.dp)), contentAlignment = Alignment.Center) {
-            Text("N", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black)
+        Box(Modifier.size(42.dp).background(Red, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+            Text("N", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Black)
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(11.dp))
         Column {
-            Text("NeuroGram", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Text("ТВОЁ ОБЩЕНИЕ. ТВОИ ПРАВИЛА.", color = Muted, fontSize = 9.sp, letterSpacing = 1.3.sp)
+            Text("NeuroGram", color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+            Text("ОБЩАЙСЯ БЕЗ ГРАНИЦ", color = Muted, fontSize = 9.sp, letterSpacing = 1.1.sp)
         }
     }
 }
@@ -302,26 +304,26 @@ private fun AuthScreen(
     nickname: String, onNickname: (String) -> Unit,
     error: String, loading: Boolean, onSubmit: () -> Unit, onSwitch: () -> Unit
 ) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 25.dp), verticalArrangement = Arrangement.Center) {
+    Column(Modifier.fillMaxSize().background(Bg).padding(horizontal = 25.dp), verticalArrangement = Arrangement.Center) {
         BrandHeader()
-        Spacer(Modifier.height(42.dp))
-        Text(if (register) "Создать аккаунт" else "С возвращением", color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-        Text("Вход по электронной почте", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 7.dp, bottom = 25.dp))
+        Spacer(Modifier.height(48.dp))
+        Text(if (register) "Создать аккаунт" else "С возвращением", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.Bold)
+        Text(if (register) "Присоединяйся к NeuroGram" else "Войди, чтобы продолжить общение", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp, bottom = 25.dp))
         if (register) {
             AuthField(nickname, onNickname, "Username (5–20 символов)")
             Spacer(Modifier.height(12.dp))
         }
-        AuthField(email, onEmail, "Gmail или email", KeyboardType.Email)
+        AuthField(email, onEmail, "Электронная почта", KeyboardType.Email)
         Spacer(Modifier.height(12.dp))
         AuthField(password, onPassword, "Пароль", password = true)
-        if (error.isNotBlank()) Text(error, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+        if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
         Spacer(Modifier.height(22.dp))
-        Button(onClick = onSubmit, enabled = !loading, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Red)) {
-            Text(if (loading) "Подождите…" else if (register) "Зарегистрироваться" else "Войти", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Button(onClick = onSubmit, enabled = !loading, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Red)) {
+            Text(if (loading) "Подождите…" else if (register) "Создать аккаунт" else "Войти", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
-        Spacer(Modifier.height(17.dp))
+        Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            Text(if (register) "Уже есть аккаунт? " else "Нет аккаунта? ", color = Muted, fontSize = 13.sp)
+            Text(if (register) "Уже есть аккаунт? " else "Впервые здесь? ", color = Muted, fontSize = 13.sp)
             Text(if (register) "Войти" else "Регистрация", color = Red, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onSwitch))
         }
     }
@@ -334,13 +336,14 @@ private fun AuthField(
 ) {
     OutlinedTextField(
         value = value, onValueChange = onValue, modifier = Modifier.fillMaxWidth(),
-        label = { Text(label) }, singleLine = true, shape = RoundedCornerShape(15.dp),
+        label = { Text(label) }, singleLine = true, shape = RoundedCornerShape(14.dp),
         keyboardOptions = KeyboardOptions(keyboardType = keyboard),
         visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Red, unfocusedBorderColor = Color(0xFF353541),
+            focusedBorderColor = Red, unfocusedBorderColor = Divider,
             focusedLabelColor = Red, unfocusedLabelColor = Muted,
-            cursorColor = Red, focusedTextColor = Color.White, unfocusedTextColor = Color.White
+            cursorColor = Red, focusedTextColor = Ink, unfocusedTextColor = Ink,
+            focusedContainerColor = Panel, unfocusedContainerColor = Panel
         )
     )
 }
@@ -352,38 +355,53 @@ private fun ChatList(
 ) {
     var showAdd by remember { mutableStateOf(false) }
     var targetUsername by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 24.dp)) {
+    Column(Modifier.fillMaxSize().background(Bg).padding(horizontal = 18.dp, vertical = 22.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             BrandHeader()
             Spacer(Modifier.weight(1f))
-            Text("●", color = Red, fontSize = 17.sp, modifier = Modifier.clickable(onClick = onProfile).padding(10.dp))
+            Box(Modifier.size(42.dp).background(Panel, CircleShape).clickable(onClick = onProfile), contentAlignment = Alignment.Center) {
+                Text("●", color = Red, fontSize = 18.sp)
+            }
         }
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(30.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Сообщения", color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-                Text(userLabel, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+                Text("Чаты", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Text(userLabel, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             }
             Button(onClick = { showAdd = true }, colors = ButtonDefaults.buttonColors(containerColor = Red), shape = RoundedCornerShape(13.dp)) {
-                Text("+ Чат")
+                Text("+ Написать", color = Color.White, fontWeight = FontWeight.SemiBold)
             }
         }
-        if (error.isNotBlank()) Text(error, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Red)
         Spacer(Modifier.height(18.dp))
+        Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("⌕", color = Muted, fontSize = 22.sp)
+            Spacer(Modifier.width(10.dp))
+            Text("Поиск по чатам", color = Muted, fontSize = 14.sp)
+        }
+        if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Red)
+        Spacer(Modifier.height(20.dp))
         if (chats.isEmpty()) {
-            Text("Пока нет переписок. Нажми «+ Чат» и найди человека по username.", color = Muted, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(16.dp)).padding(18.dp))
+            Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(58.dp).background(Bg, CircleShape), contentAlignment = Alignment.Center) {
+                    Text("✉", color = Red, fontSize = 27.sp)
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("Пока нет сообщений", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text("Найди человека по username и начни диалог.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+            }
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 items(chats, key = { it.id }) { chat ->
-                    Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).clickable { onOpenChat(chat) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(48.dp).background(Red, CircleShape), contentAlignment = Alignment.Center) {
-                            Text(chat.title.take(1).uppercase(), color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    Row(Modifier.fillMaxWidth().background(Panel).clickable { onOpenChat(chat) }.padding(horizontal = 12.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(52.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
+                            Text(chat.title.take(1).uppercase(), color = Red, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                         }
                         Spacer(Modifier.width(13.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(chat.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text(chat.lastMessage.ifBlank { "Начните переписку" }, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                            Text(chat.title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text(chat.lastMessage.ifBlank { "Начните переписку" }, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 1)
                         }
                     }
                 }
@@ -393,10 +411,10 @@ private fun ChatList(
     if (showAdd) {
         AlertDialog(
             onDismissRequest = { showAdd = false },
-            title = { Text("Новый диалог") },
+            title = { Text("Новое сообщение", color = Ink) },
             text = {
                 Column {
-                    Text("Найди человека по его уникальному username в NeuroGram.", color = Muted, fontSize = 13.sp)
+                    Text("Найди человека по его username в NeuroGram.", color = Muted, fontSize = 13.sp)
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(value = targetUsername, onValueChange = { targetUsername = it }, label = { Text("@username") }, singleLine = true)
                 }
@@ -404,7 +422,8 @@ private fun ChatList(
             confirmButton = {
                 TextButton(onClick = { showAdd = false; onAddChat(targetUsername) }) { Text("Найти", color = Red) }
             },
-            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Отмена") } }
+            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Отмена", color = Muted) } },
+            containerColor = Panel
         )
     }
 }
@@ -423,18 +442,10 @@ private fun ChatScreen(
         val listener = db.collection("chats").document(chatId).collection("messages")
             .orderBy("createdAt")
             .addSnapshotListener { snapshot, exception ->
-                if (exception != null) {
-                    error = "Не удалось загрузить сообщения: ${exception.localizedMessage}"
-                } else {
-                    messages = snapshot?.documents?.map { doc ->
-                        MessageItem(
-                            doc.id,
-                            doc.getString("senderId") ?: "",
-                            doc.getString("senderName") ?: "Пользователь",
-                            doc.getString("text") ?: ""
-                        )
-                    } ?: emptyList()
-                }
+                if (exception != null) error = "Не удалось загрузить сообщения: ${exception.localizedMessage}"
+                else messages = snapshot?.documents?.map { doc ->
+                    MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "")
+                } ?: emptyList()
             }
         onDispose { listener.remove() }
     }
@@ -443,47 +454,53 @@ private fun ChatScreen(
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
 
-    Column(Modifier.fillMaxSize().padding(14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("‹", color = Red, fontSize = 30.sp, modifier = Modifier.clickable(onClick = onBack).padding(end = 12.dp))
+    Column(Modifier.fillMaxSize().background(Bg).padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(16.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("‹", color = Red, fontSize = 30.sp, modifier = Modifier.clickable(onClick = onBack).padding(horizontal = 8.dp))
+            Box(Modifier.size(42.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
+                Text(title.take(1).uppercase(), color = Red, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            }
+            Spacer(Modifier.width(11.dp))
             Column {
-                Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                Text("NeuroGram", color = Muted, fontSize = 11.sp)
+                Text(title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("был(а) недавно", color = Muted, fontSize = 11.sp)
             }
         }
-        if (error.isNotBlank()) Text(error, color = Red, fontSize = 12.sp)
+        if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp)
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
             items(messages, key = { it.id }) { message ->
                 val mine = message.senderId == myUid
-                Column(
-                    Modifier.fillMaxWidth(),
-                    horizontalAlignment = if (mine) Alignment.End else Alignment.Start
-                ) {
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
                     Text(
                         if (mine) "Вы" else message.senderName,
                         color = Muted, fontSize = 10.sp,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp)
                     )
                     Text(
-                        message.text, color = Color.White, fontSize = 14.sp,
+                        message.text, color = if (mine) Color.White else Ink, fontSize = 14.sp,
                         modifier = Modifier.widthIn(max = 290.dp)
-                            .background(if (mine) Color(0xFF7B2636) else Panel, RoundedCornerShape(15.dp))
-                            .padding(horizontal = 13.dp, vertical = 10.dp)
+                            .background(if (mine) Red else Panel, RoundedCornerShape(17.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
                     )
                 }
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = draft, onValueChange = { draft = it },
-                modifier = Modifier.weight(1f), placeholder = { Text("Сообщение…") },
-                shape = RoundedCornerShape(16.dp), maxLines = 4
+                modifier = Modifier.weight(1f), placeholder = { Text("Сообщение…", color = Muted) },
+                shape = RoundedCornerShape(15.dp), maxLines = 4,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent,
+                    focusedTextColor = Ink, unfocusedTextColor = Ink, cursorColor = Red,
+                    focusedContainerColor = Panel, unfocusedContainerColor = Panel
+                )
             )
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(5.dp))
             Button(
                 onClick = {
                     val text = draft.trim()
@@ -491,22 +508,34 @@ private fun ChatScreen(
                         draft = ""
                         val chatRef = db.collection("chats").document(chatId)
                         chatRef.collection("messages").add(mapOf(
-                            "senderId" to myUid,
-                            "senderName" to myName,
-                            "text" to text,
-                            "createdAt" to FieldValue.serverTimestamp()
+                            "senderId" to myUid, "senderName" to myName,
+                            "text" to text, "createdAt" to FieldValue.serverTimestamp()
                         )).addOnFailureListener { error = "Не отправлено: ${it.localizedMessage}" }
-                        chatRef.update(
-                            "lastMessage", text,
-                            "updatedAt", FieldValue.serverTimestamp()
-                        )
+                        chatRef.update("lastMessage", text, "updatedAt", FieldValue.serverTimestamp())
                     }
                 },
                 enabled = draft.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = Red),
-                shape = RoundedCornerShape(14.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
-            ) { Text("➤") }
+                shape = CircleShape, contentPadding = PaddingValues(14.dp)
+            ) { Text("➤", color = Color.White) }
+        }
+    }
+}
+
+@Composable
+private fun ProfileScreen(email: String, onBack: () -> Unit, onLogout: () -> Unit) {
+    Column(Modifier.fillMaxSize().background(Bg).padding(20.dp)) {
+        Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
+        Spacer(Modifier.height(35.dp))
+        Box(Modifier.size(76.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
+            Text("●", color = Red, fontSize = 30.sp)
+        }
+        Spacer(Modifier.height(20.dp))
+        Text("Профиль", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.Bold)
+        Text(email, color = Muted, fontSize = 15.sp, modifier = Modifier.padding(top = 12.dp))
+        Spacer(Modifier.height(25.dp))
+        Button(onClick = onLogout, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Red)) {
+            Text("Выйти из аккаунта", color = Color.White)
         }
     }
 }
