@@ -662,12 +662,11 @@ private fun ProfileScreen(
         db.runTransaction { transaction ->
             val existing = transaction.get(newRef)
             if (existing.exists() && existing.getString("uid") != uid) throw IllegalStateException("Этот username уже занят")
+            val oldRef = if (oldUsername.isNotBlank() && oldUsername != nextUsername)
+                db.collection("usernames").document(oldUsername) else null
+            val oldDoc = if (oldRef != null) transaction.get(oldRef) else null
             transaction.set(newRef, mapOf("uid" to uid))
-            if (oldUsername.isNotBlank() && oldUsername != nextUsername) {
-                val oldRef = db.collection("usernames").document(oldUsername)
-                val oldDoc = transaction.get(oldRef)
-                if (oldDoc.exists() && oldDoc.getString("uid") == uid) transaction.delete(oldRef)
-            }
+            if (oldRef != null && oldDoc?.exists() == true && oldDoc.getString("uid") == uid) transaction.delete(oldRef)
             val common = mapOf("uid" to uid, "username" to nextUsername, "usernameLower" to nextUsername,
                 "nickname" to nextUsername, "bio" to nextBio, "avatarUrl" to avatarUrl)
             transaction.set(db.collection("users").document(uid), common, com.google.firebase.firestore.SetOptions.merge())
