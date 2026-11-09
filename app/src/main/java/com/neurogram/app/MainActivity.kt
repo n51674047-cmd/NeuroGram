@@ -36,15 +36,14 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 
 private var appDarkTheme by mutableStateOf(false)
-private var appAccentColor by mutableStateOf(0xFF3390ECL)
 private var appMessageScale by mutableFloatStateOf(1f)
 
-private val Bg: Color get() = if (appDarkTheme) Color(0xFF101820) else Color(0xFFF2F4F7)
-private val Panel: Color get() = if (appDarkTheme) Color(0xFF1B2733) else Color.White
-private val Red: Color get() = Color(appAccentColor)
-private val Muted: Color get() = if (appDarkTheme) Color(0xFF9AAAB8) else Color(0xFF7D8B99)
-private val Ink: Color get() = if (appDarkTheme) Color(0xFFEAF1F7) else Color(0xFF17212B)
-private val Divider: Color get() = if (appDarkTheme) Color(0xFF30404D) else Color(0xFFE7EBEF)
+private val Bg: Color get() = if (appDarkTheme) Color(0xFF0B1220) else Color(0xFFF3F6FC)
+private val Panel: Color get() = if (appDarkTheme) Color(0xFF151F30) else Color(0xFFFFFFFF)
+private val Red: Color get() = if (appDarkTheme) Color(0xFF82AAFF) else Color(0xFF2878E7)
+private val Muted: Color get() = if (appDarkTheme) Color(0xFF9AAAC0) else Color(0xFF718096)
+private val Ink: Color get() = if (appDarkTheme) Color(0xFFF0F5FF) else Color(0xFF17243A)
+private val Divider: Color get() = if (appDarkTheme) Color(0xFF29364A) else Color(0xFFE3EAF4)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -80,7 +79,6 @@ private fun NeuroGramApp() {
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
         appDarkTheme = prefs.getBoolean("dark_theme", false)
-        appAccentColor = prefs.getLong("accent_color", 0xFF3390ECL)
         appMessageScale = prefs.getFloat("message_scale", 1f)
     }
     val auth = remember { FirebaseAuth.getInstance() }
@@ -573,19 +571,10 @@ private fun SettingsScreen(onBack: () -> Unit) {
         appDarkTheme = value
         prefs.edit().putBoolean("dark_theme", value).apply()
     }
-    fun saveAccent(value: Long) {
-        appAccentColor = value
-        prefs.edit().putLong("accent_color", value).apply()
-    }
     fun saveScale(value: Float) {
         appMessageScale = value
         prefs.edit().putFloat("message_scale", value).apply()
     }
-    val accents = listOf(
-        0xFF3390ECL to "Синий", 0xFFE05260L to "Красный",
-        0xFF8B6CEBL to "Фиолетовый", 0xFF22A06BL to "Зелёный",
-        0xFFFF9F43L to "Оранжевый"
-    )
     Column(Modifier.fillMaxSize().background(Bg).verticalScroll(rememberScrollState()).padding(20.dp)) {
         Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
         Spacer(Modifier.height(24.dp))
@@ -596,25 +585,12 @@ private fun SettingsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Тёмная тема", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Переключение светлого и тёмного оформления", color = Muted, fontSize = 12.sp)
+                    Text(if (appDarkTheme) "Тёмная тема" else "Светлая тема", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Выбери удобное оформление приложения", color = Muted, fontSize = 12.sp)
                 }
                 Switch(checked = appDarkTheme, onCheckedChange = { saveTheme(it) })
             }
             Spacer(Modifier.height(18.dp))
-            Text("Цвет интерфейса", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text("Цвет кнопок и основных акцентов", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
-            Spacer(Modifier.height(13.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                accents.forEach { (color, label) ->
-                    Column(Modifier.weight(1f).clickable { saveAccent(color) }, horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.size(32.dp).background(Color(color), CircleShape), contentAlignment = Alignment.Center) {
-                            if (appAccentColor == color) Text("✓", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
-                        Text(label, color = Muted, fontSize = 9.sp, modifier = Modifier.padding(top = 5.dp))
-                    }
-                }
-            }
         }
         Spacer(Modifier.height(15.dp))
         Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
