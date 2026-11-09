@@ -4,16 +4,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -29,9 +24,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.FirebaseException
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.PhoneAuthCredential
+import com.google.firebase.auth.PhoneAuthOptions
+import com.google.firebase.auth.PhoneAuthProvider
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
+import java.util.concurrent.TimeUnit
 
 private val Bg = Color(0xFF09090D)
 private val Panel = Color(0xFF171720)
@@ -45,69 +47,157 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme(
                 background = Bg, surface = Panel, primary = Red,
                 onBackground = Color.White, onSurface = Color.White
-            )) { NeuroGramApp() }
+            )) { NeuroGramApp(this) }
         }
     }
 }
 
-private data class ChatPreview(
-    val name: String, val message: String, val time: String,
-    val unread: Int, val color: Color
-)
-
+private data class ChatPreview(val name: String, val message: String, val color: Color)
 private val demoChats = listOf(
-    ChatPreview("Александр", "Окей, договорились", "12:48", 2, Color(0xFF9B5DE5)),
-    ChatPreview("Мария", "Отправила фотографию", "11:32", 0, Color(0xFF00B4D8)),
-    ChatPreview("Разработка", "Ты: скоро покажу результат", "Вчера", 5, Color(0xFFFF8C42)),
-    ChatPreview("Илья", "Ахах, понятно", "Пн", 0, Color(0xFF43AA8B))
+    ChatPreview("Александр", "Окей, договорились", Color(0xFF9B5DE5)),
+    ChatPreview("Мария", "Отправила фотографию", Color(0xFF00B4D8)),
+    ChatPreview("Разработка", "Скоро покажу результат", Color(0xFFFF8C42)),
+    ChatPreview("Илья", "Ахах, понятно", Color(0xFF43AA8B))
 )
 
-@OptIn(ExperimentalAnimationApi::class)
 @Composable
-private fun NeuroGramApp() {
-    var page by remember { mutableStateOf("login") }
-    var selected by remember { mutableStateOf<ChatPreview?>(null) }
+private fun NeuroGramApp(activity: ComponentActivity) {
+    val auth = remember { FirebaseAuth.getInstance() }
+    val db = remember { FirebaseFirestore.getInstance() }
+    var page by remember { mutableStateOf(if (auth.currentUser != null) "chats" else "login") }
+    var isRegister by remember { mutableStateOf(false) }
     var phone by remember { mutableStateOf("") }
     var nickname by remember { mutableStateOf("") }
+    var verificationId by remember { mutableStateOf<String?>(null) }
+    var resendToken by remember { mutableStateOf<PhoneAuthProvider.ForceResendingToken?>(null) }
+    var code by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+    var info by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+
+    fun finishSignIn(credential: PhoneAuthCredential) {
+        loading = true
+        auth.signInWithCredential(credential)
+            .addOnSuccessListener { result ->
+                val user = result.user
+                if (user == null) {
+                    loading = false
+                    error = "Не удалось получить аккаунт. Попробуй ещё раз."
+                    return@addOnSuccessListener
+                }
+                val data = mutableMapOf<String, Any>("phone" to (user.phoneNumber ?: phone))
+                if (nickname.isNotBlank()) data["nickname"] = nickname.trim()
+                db.collection("users").document(user.uid).set(data, SetOptions.merge())
+                    .addOnSuccessListener {
+                        loading = false
+                        error = ""
+                        page = "chats"
+                    }
+                    .addOnFailureListener {
+                        loading = false
+                        error = "Вход выполнен, но профиль не сохранился: ${it.localizedMessage}"
+                        page = "chats"
+                    }
+            }
+            .addOnFailureListener {
+                loading = false
+                error = it.localizedMessage ?: "Не удалось подтвердить номер"
+            }
+    }
+
+    val callbacks = remember {
+        object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+            override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+                finishSignIn(credential)
+            }
+            override fun onVerificationFailed(e: FirebaseException) {
+                loading = false
+                error = e.localizedMessage ?: "Firebase не смог отправить SMS"
+            }
+            override fun onCodeSent(id: String, token: PhoneAuthProvider.ForceResendingToken) {
+                verificationId = id
+                resendToken = token
+                loading = false
+                error = ""
+                info = "Код отправлен. Проверь SMS."
+                page = "verify"
+            }
+        }
+    }
+
+    fun requestCode() {
+        error = ""
+        if (phone.filter { it.isDigit() }.length < 10 || !phone.startsWith("+")) {
+            error = "Введи номер в международном формате, например +7…"
+            return
+        }
+        if (isRegister && nickname.isBlank()) {
+            error = "Введи имя пользователя"
+            return
+        }
+        loading = true
+        val options = PhoneAuthOptions.newBuilder(auth)
+            .setPhoneNumber(phone.trim())
+            .setTimeout(60L, TimeUnit.SECONDS)
+            .setActivity(activity)
+            .setCallbacks(callbacks)
+            .build()
+        PhoneAuthProvider.verifyPhoneNumber(options)
+    }
 
     Surface(Modifier.fillMaxSize(), color = Bg) {
         AnimatedContent(
             targetState = page,
-            label = "NeuroGram screen transition",
+            label = "screen",
             transitionSpec = {
                 (slideInVertically { it / 12 } + fadeIn()) togetherWith
                     (slideOutVertically { -it / 12 } + fadeOut())
             }
         ) { target ->
             when (target) {
-                "login" -> AuthScreen(
-                    register = false,
-                    onSwitch = { page = "register" },
-                    onContinue = { enteredPhone, _ ->
-                        phone = enteredPhone
-                        page = "verify"
-                    }
-                )
-                "register" -> AuthScreen(
-                    register = true,
-                    onSwitch = { page = "login" },
-                    onContinue = { enteredPhone, enteredNickname ->
-                        phone = enteredPhone
-                        nickname = enteredNickname
-                        page = "verify"
+                "login", "register" -> AuthScreen(
+                    register = target == "register",
+                    nickname = nickname,
+                    onNickname = { nickname = it },
+                    phone = phone,
+                    onPhone = { phone = it },
+                    error = error,
+                    loading = loading,
+                    onContinue = { isRegister = target == "register"; requestCode() },
+                    onSwitch = {
+                        error = ""
+                        page = if (target == "register") "login" else "register"
                     }
                 )
                 "verify" -> VerifyScreen(
-                    phone = phone,
-                    onBack = { page = if (nickname.isBlank()) "login" else "register" },
-                    onConfirm = { /* Real SMS verification is added with Firebase. */ }
+                    phone = phone, code = code, onCode = { code = it },
+                    info = info, error = error, loading = loading,
+                    onBack = { page = if (isRegister) "register" else "login"; error = "" },
+                    onConfirm = {
+                        val id = verificationId
+                        if (code.length != 6) error = "Введи шестизначный код"
+                        else if (id == null) error = "Запроси SMS-код ещё раз"
+                        else {
+                            error = ""
+                            finishSignIn(PhoneAuthProvider.getCredential(id, code))
+                        }
+                    },
+                    onResend = { requestCode() }
                 )
                 "chats" -> ChatList(
-                    onChat = { selected = it; page = "chat" },
-                    onProfile = { page = "profile" }
+                    userLabel = auth.currentUser?.phoneNumber ?: "Аккаунт NeuroGram",
+                    onProfile = { page = "profile" },
+                    onChat = { page = "chat" }
                 )
-                "chat" -> ChatScreen(chat = selected, onBack = { page = "chats" })
-                else -> ProfileScreen(onBack = { page = "chats" })
+                "chat" -> ChatScreen(onBack = { page = "chats" })
+                else -> ProfileScreen(
+                    phone = auth.currentUser?.phoneNumber ?: "",
+                    onBack = { page = "chats" },
+                    onLogout = {
+                        auth.signOut()
+                        page = "login"
+                    }
+                )
             }
         }
     }
@@ -116,10 +206,7 @@ private fun NeuroGramApp() {
 @Composable
 private fun BrandHeader() {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(46.dp).background(Red, RoundedCornerShape(15.dp)),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(Modifier.size(46.dp).background(Red, RoundedCornerShape(15.dp)), contentAlignment = Alignment.Center) {
             Text("N", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black)
         }
         Spacer(Modifier.width(12.dp))
@@ -132,131 +219,73 @@ private fun BrandHeader() {
 
 @Composable
 private fun AuthScreen(
-    register: Boolean,
-    onSwitch: () -> Unit,
-    onContinue: (String, String) -> Unit
+    register: Boolean, nickname: String, onNickname: (String) -> Unit,
+    phone: String, onPhone: (String) -> Unit, error: String,
+    loading: Boolean, onContinue: () -> Unit, onSwitch: () -> Unit
 ) {
-    var nickname by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf("") }
-
-    Column(
-        Modifier.fillMaxSize().padding(horizontal = 25.dp).animateContentSize(),
-        verticalArrangement = Arrangement.Center
-    ) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 25.dp), verticalArrangement = Arrangement.Center) {
         BrandHeader()
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(45.dp))
         Text(if (register) "Создать аккаунт" else "С возвращением", color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-        Text(
-            if (register) "Зарегистрируйся по номеру телефона" else "Войди по номеру телефона",
-            color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 7.dp, bottom = 25.dp)
-        )
-
+        Text("Авторизация по номеру телефона", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 7.dp, bottom = 25.dp))
         if (register) {
-            AuthField(nickname, { nickname = it; error = "" }, "Имя пользователя")
+            AuthField(nickname, onNickname, "Имя пользователя")
             Spacer(Modifier.height(12.dp))
         }
-        AuthField(phone, { phone = it.filter { ch -> ch.isDigit() || ch == '+' }.take(16); error = "" }, "Номер телефона", KeyboardType.Phone)
-        AnimatedVisibility(visible = error.isNotBlank(), enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
-            Text(error, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
-        }
+        AuthField(phone, onPhone, "Номер телефона (+7…)", KeyboardType.Phone)
+        if (error.isNotBlank()) Text(error, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
         Spacer(Modifier.height(22.dp))
-        Button(
-            onClick = {
-                error = when {
-                    register && nickname.isBlank() -> "Введи имя пользователя"
-                    phone.filter { it.isDigit() }.length < 10 -> "Проверь номер телефона"
-                    else -> ""
-                }
-                if (error.isBlank()) onContinue(phone, nickname)
-            },
-            modifier = Modifier.fillMaxWidth().height(54.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Red)
-        ) {
-            Text("Получить код по SMS", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Button(onClick = onContinue, enabled = !loading, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Red)) {
+            Text(if (loading) "Отправка…" else "Получить код по SMS", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(17.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             Text(if (register) "Уже есть аккаунт? " else "Нет аккаунта? ", color = Muted, fontSize = 13.sp)
-            Text(
-                if (register) "Войти" else "Регистрация",
-                color = Red, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable(onClick = onSwitch)
-            )
+            Text(if (register) "Войти" else "Регистрация", color = Red, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onSwitch))
         }
-        Spacer(Modifier.height(30.dp))
-        Text(
-            "SMS-АВТОРИЗАЦИЯ • ПОКА ДЕМО-ИНТЕРФЕЙС",
-            color = Muted, fontSize = 9.sp, letterSpacing = 0.7.sp
-        )
     }
 }
 
 @Composable
-private fun VerifyScreen(phone: String, onBack: () -> Unit, onConfirm: () -> Unit) {
-    var code by remember { mutableStateOf("") }
-    var info by remember { mutableStateOf("") }
-    Column(
-        Modifier.fillMaxSize().padding(horizontal = 25.dp),
-        verticalArrangement = Arrangement.Center
-    ) {
+private fun VerifyScreen(
+    phone: String, code: String, onCode: (String) -> Unit, info: String,
+    error: String, loading: Boolean, onBack: () -> Unit,
+    onConfirm: () -> Unit, onResend: () -> Unit
+) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 25.dp), verticalArrangement = Arrangement.Center) {
         Text("‹  Назад", color = Red, fontSize = 15.sp, modifier = Modifier.clickable(onClick = onBack))
-        Spacer(Modifier.height(34.dp))
+        Spacer(Modifier.height(30.dp))
         BrandHeader()
-        Spacer(Modifier.height(42.dp))
+        Spacer(Modifier.height(40.dp))
         Text("Подтверждение", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Text("Введи код из SMS для номера $phone", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp, bottom = 24.dp))
-        AuthField(code, { code = it.filter(Char::isDigit).take(6); info = "" }, "Код из SMS", KeyboardType.Number)
-        if (info.isNotBlank()) Text(info, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
-        Spacer(Modifier.height(22.dp))
-        Button(
-            onClick = {
-                info = if (code.length != 6) "Введи шестизначный код" else
-                    "Подтверждение SMS пока не подключено. Следующий этап — Firebase."
-            },
-            modifier = Modifier.fillMaxWidth().height(54.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Red)
-        ) {
-            Text("Подтвердить номер", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        AuthField(code, { onCode(it.filter(Char::isDigit).take(6)) }, "Код из SMS", KeyboardType.Number)
+        if (info.isNotBlank()) Text(info, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 9.dp))
+        if (error.isNotBlank()) Text(error, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 9.dp))
+        Spacer(Modifier.height(20.dp))
+        Button(onClick = onConfirm, enabled = !loading, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Red)) {
+            Text(if (loading) "Проверка…" else "Подтвердить номер", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
-        Spacer(Modifier.height(16.dp))
-        Text("Код пока не отправляется: это интерфейс до подключения Firebase.", color = Muted, fontSize = 11.sp)
+        Text("Отправить код повторно", color = Red, modifier = Modifier.align(Alignment.CenterHorizontally).clickable(onClick = onResend).padding(16.dp))
     }
 }
 
 @Composable
-private fun AuthField(
-    value: String,
-    onValue: (String) -> Unit,
-    label: String,
-    keyboard: KeyboardType = KeyboardType.Text,
-    password: Boolean = false
-) {
+private fun AuthField(value: String, onValue: (String) -> Unit, label: String, keyboard: KeyboardType = KeyboardType.Text) {
     OutlinedTextField(
-        value = value,
-        onValueChange = onValue,
-        modifier = Modifier.fillMaxWidth(),
-        label = { Text(label) },
-        singleLine = true,
-        shape = RoundedCornerShape(15.dp),
+        value = value, onValueChange = onValue, modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) }, singleLine = true, shape = RoundedCornerShape(15.dp),
         keyboardOptions = KeyboardOptions(keyboardType = keyboard),
-        visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Red,
-            unfocusedBorderColor = Color(0xFF353541),
-            focusedLabelColor = Red,
-            unfocusedLabelColor = Muted,
-            cursorColor = Red,
-            focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White
+            focusedBorderColor = Red, unfocusedBorderColor = Color(0xFF353541),
+            focusedLabelColor = Red, unfocusedLabelColor = Muted,
+            cursorColor = Red, focusedTextColor = Color.White, unfocusedTextColor = Color.White
         )
     )
 }
 
 @Composable
-private fun ChatList(onChat: (ChatPreview) -> Unit, onProfile: () -> Unit) {
+private fun ChatList(userLabel: String, onProfile: () -> Unit, onChat: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             BrandHeader()
@@ -265,64 +294,45 @@ private fun ChatList(onChat: (ChatPreview) -> Unit, onProfile: () -> Unit) {
         }
         Spacer(Modifier.height(32.dp))
         Text("Сообщения", color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-        Text("Твои чаты в одном месте", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp, bottom = 22.dp))
+        Text(userLabel, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp, bottom = 22.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(demoChats) { chat -> ChatRow(chat) { onChat(chat) } }
-        }
-        Spacer(Modifier.weight(1f))
-        Text("ДЕМО-РЕЖИМ • ДАННЫЕ ПОКА ЛОКАЛЬНЫЕ", color = Muted, fontSize = 9.sp, letterSpacing = 0.8.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
-    }
-}
-
-@Composable
-private fun ChatRow(chat: ChatPreview, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).clickable(onClick = onClick).padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(Modifier.size(48.dp).background(chat.color, CircleShape), contentAlignment = Alignment.Center) {
-            Text(chat.name.take(1), color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-        }
-        Spacer(Modifier.width(13.dp))
-        Column(Modifier.weight(1f)) {
-            Text(chat.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text(chat.message, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(chat.time, color = Muted, fontSize = 10.sp)
-            if (chat.unread > 0) {
-                Box(Modifier.padding(top = 7.dp).background(Red, CircleShape).padding(horizontal = 7.dp, vertical = 3.dp)) {
-                    Text(chat.unread.toString(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            items(demoChats) { chat ->
+                Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).clickable(onClick = onChat).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(48.dp).background(chat.color, CircleShape), contentAlignment = Alignment.Center) {
+                        Text(chat.name.take(1), color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(13.dp))
+                    Column {
+                        Text(chat.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text(chat.message, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    }
                 }
             }
         }
+        Spacer(Modifier.weight(1f))
+        Text("АККАУНТ ПОДКЛЮЧЁН К FIREBASE", color = Muted, fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
     }
 }
 
 @Composable
-private fun ChatScreen(chat: ChatPreview?, onBack: () -> Unit) {
+private fun ChatScreen(onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
         Spacer(Modifier.height(25.dp))
-        Text(chat?.name ?: "Чат", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-        Text("Личный чат", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+        Text("Переписка", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.weight(1f))
-        Text(
-            "Экран переписки готовится. Отправка сообщений между устройствами появится после подключения сервера.",
-            color = Muted, fontSize = 14.sp,
-            modifier = Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(16.dp)).padding(18.dp)
-        )
+        Text("Авторизация уже подключена. Следующий этап — реальные диалоги и сообщения в Firestore.", color = Muted, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(16.dp)).padding(18.dp))
     }
 }
 
 @Composable
-private fun ProfileScreen(onBack: () -> Unit) {
+private fun ProfileScreen(phone: String, onBack: () -> Unit, onLogout: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
         Spacer(Modifier.height(35.dp))
         Text("Профиль", color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(18.dp))
-        Text("Гость NeuroGram", color = Color.White, fontSize = 18.sp)
-        Text("После подключения регистрации здесь появятся настройки аккаунта.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 7.dp))
+        Text(phone, color = Muted, fontSize = 15.sp, modifier = Modifier.padding(top = 12.dp))
+        Spacer(Modifier.height(25.dp))
+        Button(onClick = onLogout, colors = ButtonDefaults.buttonColors(containerColor = Red)) { Text("Выйти из аккаунта") }
     }
 }
