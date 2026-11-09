@@ -114,18 +114,23 @@ private fun NeuroGramApp() {
 
     fun saveProfile(userId: String, userEmail: String, displayName: String, onDone: () -> Unit) {
         val safeName = displayName.ifBlank { userEmail.substringBefore("@") }
-        val profile = mapOf(
-            "uid" to userId,
-            "email" to userEmail.lowercase(),
-            "nickname" to safeName
-        )
-        db.collection("users").document(userId).set(profile)
-            .addOnSuccessListener {
-                db.collection("publicProfiles").document(userId).set(profile)
-                    .addOnSuccessListener { onDone() }
-                    .addOnFailureListener { loading = false; error = "Аккаунт создан, но профиль не сохранился: ${it.localizedMessage}" }
+        val username = safeName.removePrefix("@").lowercase()
+        val profile = mapOf("uid" to userId, "email" to userEmail.lowercase(),
+            "nickname" to username, "username" to username, "usernameLower" to username)
+        val usernameRef = db.collection("usernames").document(username)
+        db.runTransaction { transaction ->
+            val existing = transaction.get(usernameRef)
+            if (existing.exists() && existing.getString("uid") != userId) {
+                throw IllegalStateException("Этот username уже занят")
             }
-            .addOnFailureListener { loading = false; error = "Не удалось сохранить профиль: ${it.localizedMessage}" }
+            transaction.set(usernameRef, mapOf("uid" to userId))
+            transaction.set(db.collection("users").document(userId), profile)
+            transaction.set(db.collection("publicProfiles").document(userId), mapOf(
+                "uid" to userId, "nickname" to username, "username" to username, "usernameLower" to username))
+            null
+        }.addOnSuccessListener { onDone() }.addOnFailureListener {
+            loading = false; error = it.localizedMessage ?: "Не удалось сохранить username"
+        }
     }
 
     fun submitAuth() {
@@ -139,8 +144,9 @@ private fun NeuroGramApp() {
             error = "Пароль должен содержать минимум 6 символов"
             return
         }
-        if (isRegister && nickname.isBlank()) {
-            error = "Введи имя пользователя"
+        val cleanUsername = nickname.trim().removePrefix("@").lowercase()
+        if (isRegister && !Regex("^[a-z0-9_]{5,20}$").matches(cleanUsername)) {
+            error = "Username: 5–20 символов, латиница, цифры и _"
             return
         }
         loading = true
@@ -153,10 +159,18 @@ private fun NeuroGramApp() {
                 error = "Firebase не вернул аккаунт"
                 return@addOnSuccessListener
             }
-            saveProfile(user.uid, cleanEmail, nickname.trim().ifBlank { cleanEmail.substringBefore("@") }) {
-                loading = false
-                error = ""
-                page = "chats"
+            if (isRegister) {
+                saveProfile(user.uid, cleanEmail, cleanUsername) {
+                    loading = false; error = ""; nickname = cleanUsername; page = "chats"
+                }
+            } else {
+                db.collection("users").document(user.uid).get().addOnSuccessListener { profile ->
+                    val existingUsername = profile.getString("username") ?: profile.getString("nickname")
+                        ?: cleanEmail.substringBefore("@")
+                    saveProfile(user.uid, cleanEmail, existingUsername) {
+                        loading = false; error = ""; nickname = existingUsername; page = "chats"
+                    }
+                }.addOnFailureListener { loading = false; error = "Не удалось загрузить профиль: ${it.localizedMessage}" }
             }
         }.addOnFailureListener {
             loading = false
@@ -164,19 +178,17 @@ private fun NeuroGramApp() {
         }
     }
 
-    fun startChat(targetEmail: String) {
+    fun startChat(targetUsername: String) {
         val me = currentUser ?: return
-        val cleanTarget = targetEmail.trim().lowercase()
-        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(cleanTarget).matches()) {
-            error = "Введи корректный email собеседника"
-            return
+        val cleanTarget = targetUsername.trim().removePrefix("@").lowercase()
+        if (!Regex("^[a-z0-9_]{5,20}$").matches(cleanTarget)) {
+            error = "Введи username: 5–20 символов"; return
         }
-        if (cleanTarget == me.email?.lowercase()) {
-            error = "Нельзя начать диалог с самим собой"
-            return
+        if (cleanTarget == nickname.trim().removePrefix("@").lowercase()) {
+            error = "Нельзя начать диалог с самим собой"; return
         }
         loading = true
-        db.collection("publicProfiles").whereEqualTo("email", cleanTarget).limit(1).get()
+        db.collection("publicProfiles").whereEqualTo("usernameLower", cleanTarget).limit(1).get()
             .addOnSuccessListener { result ->
                 val target = result.documents.firstOrNull()
                 if (target == null) {
@@ -185,7 +197,7 @@ private fun NeuroGramApp() {
                     return@addOnSuccessListener
                 }
                 val otherId = target.id
-                val otherName = target.getString("nickname") ?: cleanTarget.substringBefore("@")
+                val otherName = target.getString("username") ?: cleanTarget
                 val myName = nickname.ifBlank { me.email?.substringBefore("@") ?: "Я" }
                 val members = listOf(me.uid, otherId).sorted()
                 val chatId = members.joinToString("_")
@@ -296,7 +308,7 @@ private fun AuthScreen(
         Text(if (register) "Создать аккаунт" else "С возвращением", color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.Bold)
         Text("Вход по электронной почте", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 7.dp, bottom = 25.dp))
         if (register) {
-            AuthField(nickname, onNickname, "Имя пользователя")
+            AuthField(nickname, onNickname, "Username (5–20 символов)")
             Spacer(Modifier.height(12.dp))
         }
         AuthField(email, onEmail, "Gmail или email", KeyboardType.Email)
@@ -339,7 +351,7 @@ private fun ChatList(
     onAddChat: (String) -> Unit, onOpenChat: (ChatItem) -> Unit, onProfile: () -> Unit
 ) {
     var showAdd by remember { mutableStateOf(false) }
-    var targetEmail by remember { mutableStateOf("") }
+    var targetUsername by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             BrandHeader()
@@ -360,7 +372,7 @@ private fun ChatList(
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Red)
         Spacer(Modifier.height(18.dp))
         if (chats.isEmpty()) {
-            Text("Пока нет переписок. Нажми «+ Чат» и найди собеседника по email.", color = Muted, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(16.dp)).padding(18.dp))
+            Text("Пока нет переписок. Нажми «+ Чат» и найди человека по username.", color = Muted, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(16.dp)).padding(18.dp))
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(chats, key = { it.id }) { chat ->
@@ -384,13 +396,13 @@ private fun ChatList(
             title = { Text("Новый диалог") },
             text = {
                 Column {
-                    Text("Введи email человека, который уже зарегистрирован в NeuroGram.", color = Muted, fontSize = 13.sp)
+                    Text("Найди человека по его уникальному username в NeuroGram.", color = Muted, fontSize = 13.sp)
                     Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(value = targetEmail, onValueChange = { targetEmail = it }, label = { Text("Email собеседника") }, singleLine = true)
+                    OutlinedTextField(value = targetUsername, onValueChange = { targetUsername = it }, label = { Text("@username") }, singleLine = true)
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showAdd = false; onAddChat(targetEmail) }) { Text("Создать", color = Red) }
+                TextButton(onClick = { showAdd = false; onAddChat(targetUsername) }) { Text("Найти", color = Red) }
             },
             dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Отмена") } }
         )
