@@ -23,6 +23,13 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      # Keep one debug signing key across workflow runs so APK updates install over the previous version.
+      - name: Restore persistent debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: novixgram-debug-keystore-v1
+
       - name: Build debug APK
         run: gradle assembleDebug
 
