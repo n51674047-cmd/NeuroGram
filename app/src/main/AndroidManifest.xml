@@ -3,6 +3,7 @@
     <application
         android:allowBackup="true"
         android:label="NovixGram"
+        android:icon="@drawable/novixgram_icon"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <activity
