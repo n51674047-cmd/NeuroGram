@@ -257,7 +257,7 @@ private fun NovixGramApp() {
                             break
                         }
                     }
-                    if (version.isNotBlank() && apkUrl.isNotBlank() && isNewerVersion(version, "0.2.2")) {
+                    if (version.isNotBlank() && apkUrl.isNotBlank() && isNewerVersion(version, BuildConfig.VERSION_NAME)) {
                         Handler(Looper.getMainLooper()).post { updateInfo = UpdateInfo(version, apkUrl) }
                     }
                 }
@@ -296,12 +296,13 @@ private fun NovixGramApp() {
                 .setMimeType("application/vnd.android.package-archive")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, "NovixGram-${info.version}.apk")
-            downloadedUpdateId = manager.enqueue(request)
+            val queuedDownloadId = manager.enqueue(request)
+            downloadedUpdateId = queuedDownloadId
             thread {
                 var finished = false
                 while (!finished) {
                     Thread.sleep(1000)
-                    val q = DownloadManager.Query().setFilterById(downloadedUpdateId)
+                    val q = DownloadManager.Query().setFilterById(queuedDownloadId)
                     manager.query(q).use { cursor ->
                         if (cursor != null && cursor.moveToFirst()) {
                             val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
