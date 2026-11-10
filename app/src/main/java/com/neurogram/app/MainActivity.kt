@@ -620,6 +620,8 @@ private fun NovixGramApp() {
                     "chats" -> ChatList(
                         userLabel = currentUser?.email ?: "Аккаунт NovixGram",
                         chats = chats, error = error, loading = loading,
+                        updateInfo = updateInfo, updateDownloading = updateDownloading,
+                        onUpdate = { installOrDownloadUpdate() },
                         onAddChat = { startChat(it) },
                         onOpenChat = { chat ->
                             selectedChatId = chat.id
