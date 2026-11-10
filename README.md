@@ -1,6 +1,6 @@
-# NeuroGram
+# NovixGram
 
-NeuroGram — Android-мессенджер с тёмным интерфейсом, красными неоновыми акцентами и минималистичным дизайном.
+NovixGram — Android-мессенджер с тёмным интерфейсом, красными неоновыми акцентами и минималистичным дизайном.
 
 ## Реализовано в исходниках
 
@@ -19,9 +19,9 @@ NeuroGram — Android-мессенджер с тёмным интерфейсо�
 ## Сборка APK
 
 1. Открой вкладку **Actions** репозитория.
-2. Выбери workflow **Build NeuroGram APK**.
+2. Выбери workflow **Build NovixGram APK**.
 3. После завершения сборки открой запуск workflow.
-4. Скачай artifact **NeuroGram-debug** — внутри находится `app-debug.apk`.
+4. Скачай artifact **NovixGram-debug** — внутри находится `app-debug.apk`.
 
 ## Технологии
 
