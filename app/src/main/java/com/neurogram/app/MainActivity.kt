@@ -900,6 +900,8 @@ private fun ProfileScreen(
     onBack: () -> Unit, onSettings: () -> Unit, onUsernameChanged: (String) -> Unit, onLogout: () -> Unit
 ) {
     var username by remember(uid) { mutableStateOf("") }
+    var displayName by remember(uid) { mutableStateOf("") }
+    var editDisplayName by remember(uid) { mutableStateOf("") }
     var bio by remember(uid) { mutableStateOf("") }
     var avatarUrl by remember(uid) { mutableStateOf("") }
     var editUsername by remember(uid) { mutableStateOf("") }
