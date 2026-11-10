@@ -137,7 +137,8 @@ private data class MessageItem(
     val senderName: String,
     val text: String,
     val delivered: Boolean,
-    val read: Boolean
+    val read: Boolean,
+    val pending: Boolean = false
 )
 
 @Composable
@@ -859,12 +860,12 @@ private fun ChatScreen(
             }
         }
         val listener = chatRef.collection("messages").orderBy("createdAt")
-            .addSnapshotListener { snapshot, messageException ->
+            .addSnapshotListener(com.google.firebase.firestore.MetadataChanges.INCLUDE) { snapshot, messageException ->
                 if (messageException != null) error = "Не удалось загрузить сообщения: ${messageException.localizedMessage}"
                 else {
                     val docs = snapshot?.documents ?: emptyList()
                     messages = docs.map { doc ->
-                        MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "", doc.getTimestamp("deliveredAt") != null, doc.getTimestamp("readAt") != null)
+                        MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "", doc.getTimestamp("deliveredAt") != null, doc.getTimestamp("readAt") != null, doc.metadata.hasPendingWrites())
                     }
                     val batch = db.batch()
                     var changed = false
@@ -948,17 +949,35 @@ private fun ChatScreen(
                 val mine = message.senderId == myUid
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
                     Text(if (mine) "Вы" else message.senderName, color = Muted, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp))
-                    Text(
-                        message.text, color = if (mine) Color.White else Ink, fontSize = 14.sp * appMessageScale,
+                    Row(
                         modifier = Modifier.widthIn(max = 290.dp)
                             .then(if (mine) Modifier.background(Red, RoundedCornerShape(17.dp)) else Modifier.glassSurface(RoundedCornerShape(17.dp)))
-                            .padding(horizontal = 14.dp, vertical = 10.dp)
-                    )
-                    if (mine) Text(
-                        when { message.read -> "✓✓"; message.delivered -> "✓✓"; else -> "✓" },
-                        color = if (message.read) Color(0xFF64B5F6) else Muted,
-                        fontSize = 11.sp, modifier = Modifier.padding(end = 8.dp, top = 2.dp)
-                    )
+                            .padding(start = 14.dp, end = 10.dp, top = 9.dp, bottom = 7.dp),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text(
+                            message.text, color = if (mine) Color.White else Ink,
+                            fontSize = 14.sp * appMessageScale,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (mine) {
+                            Spacer(Modifier.width(7.dp))
+                            Text(
+                                when {
+                                    message.pending -> "◷"
+                                    message.read || message.delivered -> "✓✓"
+                                    else -> "✓"
+                                },
+                                color = when {
+                                    message.pending -> Color.White.copy(alpha = 0.72f)
+                                    message.read -> Color(0xFF64B5F6)
+                                    else -> Color.White.copy(alpha = 0.78f)
+                                },
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(bottom = 0.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -984,12 +1003,17 @@ private fun ChatScreen(
                     if (text.isNotEmpty() && !isBlockedByMe && !isBlockedByOther) {
                         draft = ""
                         val chatRef = db.collection("chats").document(chatId)
-                        chatRef.collection("messages").add(mapOf(
+                        val messageRef = chatRef.collection("messages").document()
+                        val batch = db.batch()
+                        batch.set(messageRef, mapOf(
                             "senderId" to myUid, "senderName" to myName,
                             "text" to text, "createdAt" to FieldValue.serverTimestamp(),
                             "deliveredAt" to null, "readAt" to null
-                        )).addOnFailureListener { error = "Не отправлено: ${it.localizedMessage}" }
-                        chatRef.update("lastMessage", text, "updatedAt", FieldValue.serverTimestamp())
+                        ))
+                        batch.update(chatRef, "lastMessage", text, "updatedAt", FieldValue.serverTimestamp())
+                        batch.commit().addOnFailureListener {
+                            error = "Не удалось отправить сообщение: ${it.localizedMessage}"
+                        }
                     }
                 },
                 enabled = draft.isNotBlank() && !isBlockedByMe && !isBlockedByOther,
