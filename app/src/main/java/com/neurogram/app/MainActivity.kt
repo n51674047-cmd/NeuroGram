@@ -62,21 +62,36 @@ private val Ink: Color get() = if (appDarkTheme) Color(0xFFF0F5FF) else Color(0x
 private val Divider: Color get() = if (appDarkTheme) Color(0xFF29364A) else Color(0xFFE3EAF4)
 
 class MainActivity : ComponentActivity() {
+    private var lastPresenceUid: String? = null
+    private var authPresenceListener: FirebaseAuth.AuthStateListener? = null
+
     private fun updatePresence(online: Boolean) {
-        val user = FirebaseAuth.getInstance().currentUser ?: return
+        val uid = if (online) FirebaseAuth.getInstance().currentUser?.uid else
+            lastPresenceUid ?: FirebaseAuth.getInstance().currentUser?.uid
+        if (uid.isNullOrBlank()) return
+        if (online) lastPresenceUid = uid
         val data = mapOf("online" to online, "lastSeen" to FieldValue.serverTimestamp())
         val db = FirebaseFirestore.getInstance()
         db.runBatch { batch ->
-            batch.set(db.collection("publicProfiles").document(user.uid), data, com.google.firebase.firestore.SetOptions.merge())
-            batch.set(db.collection("users").document(user.uid), data, com.google.firebase.firestore.SetOptions.merge())
+            batch.set(db.collection("publicProfiles").document(uid), data, com.google.firebase.firestore.SetOptions.merge())
+            batch.set(db.collection("users").document(uid), data, com.google.firebase.firestore.SetOptions.merge())
         }
+        if (!online) lastPresenceUid = null
     }
 
     override fun onStart() { super.onStart(); updatePresence(true) }
     override fun onStop() { updatePresence(false); super.onStop() }
 
+    override fun onDestroy() {
+        authPresenceListener?.let { FirebaseAuth.getInstance().removeAuthStateListener(it) }
+        super.onDestroy()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        authPresenceListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+            if (firebaseAuth.currentUser != null) updatePresence(true) else updatePresence(false)
+        }.also { FirebaseAuth.getInstance().addAuthStateListener(it) }
         setContent {
             MaterialTheme(colorScheme = if (appDarkTheme) darkColorScheme(
                 background = Bg, surface = Panel, primary = Red,
