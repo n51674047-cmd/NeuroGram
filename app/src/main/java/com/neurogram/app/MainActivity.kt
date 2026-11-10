@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
@@ -70,7 +71,7 @@ private val Muted: Color get() = if (appDarkTheme) Color(0xFF9AAAC0) else Color(
 private val Ink: Color get() = if (appDarkTheme) Color(0xFFF0F5FF) else Color(0xFF17243A)
 private val Divider: Color get() = if (appDarkTheme) Color(0xFF29364A) else Color(0xFFE3EAF4)
 
-private fun Modifier.glassSurface(shape: RoundedCornerShape = RoundedCornerShape(20.dp)): Modifier =
+private fun Modifier.glassSurface(shape: Shape = RoundedCornerShape(20.dp)): Modifier =
     this.background(
         Brush.verticalGradient(listOf(
             Panel.copy(alpha = if (appDarkTheme) 0.94f else 0.88f),
