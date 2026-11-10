@@ -20,18 +20,47 @@ service cloud.firestore {
     match /chats/{chatId} {
       function signedIn() { return request.auth != null; }
       function isMember() { return signedIn() && request.auth.uid in resource.data.members; }
+      function otherMemberUid() {
+        return resource.data.members[0] == request.auth.uid
+          ? resource.data.members[1] : resource.data.members[0];
+      }
+      function senderIsNotBlocked() {
+        let blockedBy = resource.data.get('blockedBy', []);
+        return !(otherMemberUid() in blockedBy);
+      }
+      function blockStateCanOnlyChangeOwnBlock() {
+        let oldBlocked = resource.data.get('blockedBy', []);
+        let newBlocked = request.resource.data.get('blockedBy', []);
+        return newBlocked is list
+          && newBlocked.hasOnly(oldBlocked.concat([request.auth.uid]))
+          && (!(otherMemberUid() in oldBlocked) || otherMemberUid() in newBlocked);
+      }
       allow create: if signedIn() && request.auth.uid in request.resource.data.members
         && request.resource.data.members.size() == 2;
       allow read: if isMember();
-      allow update: if isMember() && request.resource.data.members == resource.data.members;
+      allow update: if isMember()
+        && request.resource.data.members == resource.data.members
+        && blockStateCanOnlyChangeOwnBlock()
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastMessage'])
+          || senderIsNotBlocked());
       allow delete: if false;
       match /messages/{messageId} {
         function chatExistsAndUserIsMember() {
           return request.auth != null && request.auth.uid in get(
             /databases/$(database)/documents/chats/$(chatId)).data.members;
         }
+        function senderIsNotBlocked() {
+          let chat = get(/databases/$(database)/documents/chats/$(chatId)).data;
+          let members = chat.members;
+          let otherUid = members[0] == request.auth.uid ? members[1] : members[0];
+          let blockedBy = chat.get('blockedBy', []);
+          // blockedBy stores the UID of the person who initiated the block.
+          // The other member's block prevents this sender from writing.
+          return !(otherUid in blockedBy);
+        }
         allow read: if chatExistsAndUserIsMember();
         allow create: if chatExistsAndUserIsMember()
+          && senderIsNotBlocked()
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
