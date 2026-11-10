@@ -665,7 +665,41 @@ private fun ChatScreen(
     var messages by remember(chatId) { mutableStateOf<List<MessageItem>>(emptyList()) }
     var draft by remember(chatId) { mutableStateOf("") }
     var error by remember(chatId) { mutableStateOf("") }
+    var otherAvatar by remember(otherUid) { mutableStateOf("") }
+    var presenceOnline by remember(otherUid) { mutableStateOf(false) }
+    var presenceLastSeen by remember(otherUid) { mutableStateOf<com.google.firebase.Timestamp?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    // Basic Firestore presence while this conversation is open.
+    DisposableEffect(myUid, otherUid) {
+        val handler = Handler(Looper.getMainLooper())
+        val myProfile = db.collection("publicProfiles").document(myUid)
+        val heartbeat = object : Runnable {
+            override fun run() {
+                val data = mapOf("online" to true, "lastSeen" to FieldValue.serverTimestamp())
+                myProfile.set(data, com.google.firebase.firestore.SetOptions.merge())
+                db.collection("users").document(myUid).set(data, com.google.firebase.firestore.SetOptions.merge())
+                handler.postDelayed(this, 30_000L)
+            }
+        }
+        heartbeat.run()
+        val otherListener = db.collection("publicProfiles").document(otherUid)
+            .addSnapshotListener { doc, exception ->
+                if (exception == null && doc != null && doc.exists()) {
+                    otherAvatar = doc.getString("avatarUrl") ?: ""
+                    presenceLastSeen = doc.getTimestamp("lastSeen")
+                    val fresh = presenceLastSeen?.toDate()?.let { System.currentTimeMillis() - it.time < 75_000L } == true
+                    presenceOnline = doc.getBoolean("online") == true && fresh
+                }
+            }
+        onDispose {
+            handler.removeCallbacks(heartbeat)
+            val offline = mapOf("online" to false, "lastSeen" to FieldValue.serverTimestamp())
+            myProfile.set(offline, com.google.firebase.firestore.SetOptions.merge())
+            db.collection("users").document(myUid).set(offline, com.google.firebase.firestore.SetOptions.merge())
+            otherListener.remove()
+        }
+    }
 
     DisposableEffect(chatId) {
         val listener = db.collection("chats").document(chatId).collection("messages")
@@ -701,17 +735,29 @@ private fun ChatScreen(
     }
 
     Column(Modifier.fillMaxSize().background(Bg).statusBarsPadding().imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(16.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("‹", color = Red, fontSize = 30.sp, modifier = Modifier.clickable(onClick = onBack).padding(horizontal = 8.dp))
-            Box(Modifier.size(42.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
-                Text(title.take(1).uppercase(), color = Red, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(14.dp)).padding(horizontal = 9.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("‹", color = Red, fontSize = 27.sp, modifier = Modifier.clickable(onClick = onBack).padding(horizontal = 5.dp))
+            Box(Modifier.size(38.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
+                if (otherAvatar.isNotBlank()) {
+                    AsyncImage(model = otherAvatar, contentDescription = "Аватар собеседника",
+                        modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                } else Text(title.take(1).uppercase(), color = Red, fontWeight = FontWeight.Bold, fontSize = 17.sp)
             }
-            Spacer(Modifier.width(11.dp))
+            Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f).clickable(onClick = onViewProfile)) {
-                Text(title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Text("Открыть профиль", color = Muted, fontSize = 11.sp)
+                Text(title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                val status = if (presenceOnline) "В сети" else presenceLastSeen?.toDate()?.let { date ->
+                    val now = java.util.Calendar.getInstance()
+                    val then = java.util.Calendar.getInstance().apply { time = date }
+                    val time = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(date)
+                    if (now.get(java.util.Calendar.YEAR) == then.get(java.util.Calendar.YEAR) &&
+                        now.get(java.util.Calendar.DAY_OF_YEAR) == then.get(java.util.Calendar.DAY_OF_YEAR))
+                        "Был(а) сегодня в " + time
+                    else "Был(а) " + java.text.SimpleDateFormat("dd.MM.yyyy в HH:mm", java.util.Locale.getDefault()).format(date)
+                } ?: "Не в сети"
+                Text(status, color = if (presenceOnline) Color(0xFF2EAD68) else Muted, fontSize = 10.sp, maxLines = 1)
             }
-            Text("⋮", color = Red, fontSize = 22.sp, modifier = Modifier.clickable(onClick = onViewProfile).padding(horizontal = 8.dp))
+            Text("⋮", color = Red, fontSize = 21.sp, modifier = Modifier.clickable(onClick = onViewProfile).padding(horizontal = 5.dp))
         }
         if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp)
         LazyColumn(
@@ -783,24 +829,24 @@ private fun PublicProfileScreen(uid: String, db: FirebaseFirestore, onBack: () -
     var loading by remember(uid) { mutableStateOf(true) }
     var error by remember(uid) { mutableStateOf("") }
 
-    LaunchedEffect(uid) {
+    DisposableEffect(uid) {
         if (uid.isBlank()) {
             loading = false
             error = "Профиль не найден"
+            onDispose { }
         } else {
-            db.collection("publicProfiles").document(uid).get()
-                .addOnSuccessListener { doc ->
-                    if (doc.exists()) {
+            val registration = db.collection("publicProfiles").document(uid)
+                .addSnapshotListener { doc, exception ->
+                    if (exception != null) {
+                        error = "Не удалось загрузить профиль: " + exception.localizedMessage
+                    } else if (doc != null && doc.exists()) {
                         username = doc.getString("username") ?: doc.getString("nickname") ?: "Пользователь"
                         bio = doc.getString("bio") ?: ""
                         avatarUrl = doc.getString("avatarUrl") ?: ""
                     } else error = "Профиль не найден"
                     loading = false
                 }
-                .addOnFailureListener {
-                    error = "Не удалось загрузить профиль: ${it.localizedMessage}"
-                    loading = false
-                }
+            onDispose { registration.remove() }
         }
     }
 
@@ -865,9 +911,14 @@ private fun ProfileScreen(
             }.addOnSuccessListener { download ->
                 val url = download.toString()
                 val data = mapOf("avatarUrl" to url)
-                db.collection("users").document(uid).set(data, com.google.firebase.firestore.SetOptions.merge())
-                db.collection("publicProfiles").document(uid).set(data, com.google.firebase.firestore.SetOptions.merge())
-                avatarUrl = url; loading = false; message = "Аватар обновлён"
+                db.runBatch { batch ->
+                    batch.set(db.collection("users").document(uid), data, com.google.firebase.firestore.SetOptions.merge())
+                    batch.set(db.collection("publicProfiles").document(uid), data, com.google.firebase.firestore.SetOptions.merge())
+                }.addOnSuccessListener {
+                    avatarUrl = url; loading = false; message = "Аватар обновлён"
+                }.addOnFailureListener {
+                    loading = false; message = "Фото загружено, но профиль не обновлён: " + it.localizedMessage
+                }
             }.addOnFailureListener { loading = false; message = "Не удалось загрузить аватар: ${it.localizedMessage}" }
         }
     }
