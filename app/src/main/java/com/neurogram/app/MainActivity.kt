@@ -49,7 +49,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.concurrent.thread
 
-private const val VERIFICATION_API_URL = "PASTE_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE"
+private const val VERIFICATION_API_URL = "https://script.google.com/macros/s/AKfycby3kL3K_xlha2I2V-NATi9PktRdqnVQCILY8iK7ED_XdVnBG1iIm2ic_Ynivih32FRaAQ/exec"
 
 private var appDarkTheme by mutableStateOf(false)
 private var appMessageScale by mutableFloatStateOf(1f)
