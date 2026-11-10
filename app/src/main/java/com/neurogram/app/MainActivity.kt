@@ -1,6 +1,8 @@
 package com.neurogram.app
 
 import android.os.Bundle
+import android.app.Activity
+import android.content.ContextWrapper
 import android.os.Handler
 import android.os.Looper
 import android.net.Uri
@@ -178,6 +180,10 @@ private fun NovixGramSplash(onFinished: () -> Unit) {
 @Composable
 private fun NovixGramApp() {
     val context = LocalContext.current
+    val activity = remember(context) {
+        generateSequence(context) { (it as? ContextWrapper)?.baseContext }
+            .filterIsInstance<Activity>().firstOrNull()
+    }
     var showSplash by remember { mutableStateOf(true) }
     if (showSplash) {
         NovixGramSplash(onFinished = { showSplash = false })
@@ -425,7 +431,7 @@ private fun NovixGramApp() {
             "chat", "profile" -> "chats"
             "user_profile" -> previousPage
             "privacy", "notifications", "chat_settings", "appearance", "about" -> previousPage
-            "chats" -> "chats"
+            "chats" -> { activity?.finish(); "chats" }
             else -> "chats"
         }
     }
