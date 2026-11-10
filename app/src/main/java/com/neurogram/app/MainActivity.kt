@@ -9,12 +9,18 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,6 +34,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import androidx.compose.ui.text.font.FontWeight
@@ -39,6 +47,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -60,6 +69,14 @@ private val Red: Color get() = if (appDarkTheme) Color(0xFF82AAFF) else Color(0x
 private val Muted: Color get() = if (appDarkTheme) Color(0xFF9AAAC0) else Color(0xFF718096)
 private val Ink: Color get() = if (appDarkTheme) Color(0xFFF0F5FF) else Color(0xFF17243A)
 private val Divider: Color get() = if (appDarkTheme) Color(0xFF29364A) else Color(0xFFE3EAF4)
+
+private fun Modifier.glassSurface(shape: RoundedCornerShape = RoundedCornerShape(20.dp)): Modifier =
+    this.background(
+        Brush.verticalGradient(listOf(
+            Panel.copy(alpha = if (appDarkTheme) 0.94f else 0.88f),
+            Panel.copy(alpha = if (appDarkTheme) 0.78f else 0.72f)
+        )), shape
+    ).border(1.dp, Color.White.copy(alpha = if (appDarkTheme) 0.10f else 0.78f), shape)
 
 class MainActivity : ComponentActivity() {
     private var lastPresenceUid: String? = null
@@ -108,7 +125,9 @@ private data class ChatItem(
     val id: String,
     val title: String,
     val lastMessage: String,
-    val otherUid: String
+    val otherUid: String,
+    val isMuted: Boolean = false,
+    val isBlocked: Boolean = false
 )
 
 private data class MessageItem(
@@ -121,8 +140,47 @@ private data class MessageItem(
 )
 
 @Composable
+private fun NeuroGramSplash(onFinished: () -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    var exiting by remember { mutableStateOf(false) }
+    val alpha by animateFloatAsState(
+        targetValue = if (exiting) 0f else 1f,
+        animationSpec = tween(520),
+        label = "splashAlpha",
+        finishedListener = { if (exiting && it == 0f) onFinished() }
+    )
+    LaunchedEffect(Unit) {
+        delay(420)
+        expanded = true
+        delay(1050)
+        exiting = true
+    }
+    Box(
+        Modifier.fillMaxSize().background(Bg).graphicsLayer { this.alpha = alpha },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.animateContentSize()) {
+                Text("N", color = Red, fontSize = 76.sp, fontWeight = FontWeight.Black)
+                AnimatedVisibility(visible = expanded, enter = expandHorizontally(tween(620)) + fadeIn(tween(500))) {
+                    Text("euroGram", color = Ink, fontSize = 37.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+            }
+            AnimatedVisibility(visible = expanded, enter = fadeIn(tween(450))) {
+                Text("МЕССЕНДЖЕР", color = Muted, fontSize = 10.sp, letterSpacing = 4.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+    }
+}
+
+@Composable
 private fun NeuroGramApp() {
     val context = LocalContext.current
+    var showSplash by remember { mutableStateOf(true) }
+    if (showSplash) {
+        NeuroGramSplash(onFinished = { showSplash = false })
+        return
+    }
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
         appDarkTheme = prefs.getBoolean("dark_theme", false)
@@ -179,12 +237,17 @@ private fun NeuroGramApp() {
                     if (exception != null) {
                         error = "Не удалось загрузить чаты: ${exception.localizedMessage}"
                     } else {
-                        chats = snapshot?.documents?.map { doc ->
+                        chats = snapshot?.documents?.mapNotNull { doc ->
                             val members = doc.get("members") as? List<*> ?: emptyList<Any>()
                             val otherId = members.firstOrNull { it?.toString() != uid }?.toString()
                             val names = doc.get("memberNames") as? Map<*, *> ?: emptyMap<Any, Any>()
                             val title = names[otherId]?.toString() ?: "Диалог NeuroGram"
-                            ChatItem(doc.id, title, doc.getString("lastMessage") ?: "Нет сообщений", otherId ?: "")
+                            val hiddenFor = doc.get("hiddenFor") as? List<*> ?: emptyList<Any>()
+                            if (hiddenFor.contains(uid)) return@mapNotNull null
+                            val mutedFor = doc.get("mutedFor") as? List<*> ?: emptyList<Any>()
+                            val blockedBy = doc.get("blockedBy") as? List<*> ?: emptyList<Any>()
+                            ChatItem(doc.id, title, doc.getString("lastMessage") ?: "Нет сообщений",
+                                otherId ?: "", mutedFor.contains(uid), blockedBy.contains(uid))
                         }?.sortedByDescending { it.id } ?: emptyList()
                     }
                 }
@@ -414,8 +477,8 @@ private fun NeuroGramApp() {
                 targetState = page,
                 label = "screen",
                 transitionSpec = {
-                    (slideInVertically { it / 12 } + fadeIn()) togetherWith
-                        (slideOutVertically { -it / 12 } + fadeOut())
+                    (slideInVertically(animationSpec = tween(360)) { it / 18 } + fadeIn(tween(360))) togetherWith
+                        (slideOutVertically(animationSpec = tween(260)) { -it / 24 } + fadeOut(tween(260)))
                 }
             ) { target ->
                 when (target) {
@@ -608,36 +671,108 @@ private fun ChatList(
 ) {
     var showAdd by remember { mutableStateOf(false) }
     var targetUsername by remember { mutableStateOf("") }
+    var foundUid by remember { mutableStateOf("") }
+    var foundName by remember { mutableStateOf("") }
+    var foundUsername by remember { mutableStateOf("") }
+    var foundAvatar by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    LaunchedEffect(targetUsername, showAdd) {
+        foundUid = ""; foundName = ""; foundUsername = ""; foundAvatar = ""
+        val clean = targetUsername.trim().removePrefix("@").lowercase()
+        if (!showAdd || clean.length < 2 || !Regex("^[a-z0-9_]{2,20}$").matches(clean)) {
+            searching = false
+            return@LaunchedEffect
+        }
+        delay(300)
+        searching = true
+        FirebaseFirestore.getInstance().collection("publicProfiles")
+            .whereEqualTo("usernameLower", clean).limit(1).get()
+            .addOnSuccessListener { result ->
+                if (showAdd && targetUsername.trim().removePrefix("@").lowercase() == clean) {
+                    val doc = result.documents.firstOrNull()
+                    foundUid = doc?.id ?: ""
+                    foundName = doc?.getString("displayName") ?: doc?.getString("username") ?: ""
+                    foundUsername = doc?.getString("username") ?: clean
+                    foundAvatar = doc?.getString("avatarUrl") ?: ""
+                    searching = false
+                }
+            }.addOnFailureListener { searching = false }
+    }
+
     Box(Modifier.fillMaxSize().background(Bg)) {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp).padding(top = 12.dp, bottom = 18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(42.dp).background(Panel, RoundedCornerShape(14.dp)).clickable(onClick = onMenu), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(42.dp).glassSurface(RoundedCornerShape(14.dp)).clickable(onClick = onMenu), contentAlignment = Alignment.Center) {
                     Text("☰", color = Red, fontSize = 22.sp)
                 }
                 Spacer(Modifier.width(12.dp))
                 BrandHeader()
                 Spacer(Modifier.weight(1f))
-                Box(Modifier.size(42.dp).background(Panel, CircleShape).clickable(onClick = onProfile), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(42.dp).glassSurface(CircleShape).clickable(onClick = onProfile), contentAlignment = Alignment.Center) {
                     Text("●", color = Red, fontSize = 18.sp)
                 }
             }
-            Spacer(Modifier.height(36.dp))
+            Spacer(Modifier.height(30.dp))
             Column {
                 Text("Чаты", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
                 Text(userLabel, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             }
             Spacer(Modifier.height(18.dp))
-            Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(15.dp)).padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("⌕", color = Muted, fontSize = 22.sp)
                 Spacer(Modifier.width(10.dp))
                 Text("Поиск по чатам", color = Muted, fontSize = 14.sp)
             }
+            AnimatedVisibility(visible = showAdd, enter = fadeIn(tween(220)) + expandHorizontally(tween(260))) {
+                Column(Modifier.fillMaxWidth().padding(top = 12.dp).glassSurface(RoundedCornerShape(18.dp)).padding(13.dp).animateContentSize()) {
+                    Text("Новое сообщение", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = targetUsername, onValueChange = { targetUsername = it },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        placeholder = { Text("@username", color = Muted) },
+                        prefix = { Text("@", color = Red) },
+                        shape = RoundedCornerShape(13.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Red, unfocusedBorderColor = Divider,
+                            focusedTextColor = Ink, unfocusedTextColor = Ink,
+                            focusedContainerColor = Panel, unfocusedContainerColor = Panel,
+                            cursorColor = Red
+                        )
+                    )
+                    if (searching) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Red)
+                    AnimatedVisibility(visible = foundUid.isNotBlank(), enter = fadeIn(tween(180))) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 10.dp).clickable {
+                                val chosen = targetUsername
+                                showAdd = false
+                                onAddChat(chosen)
+                            }.padding(vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(Modifier.size(44.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
+                                if (foundAvatar.isNotBlank()) AsyncImage(model = foundAvatar, contentDescription = "Аватар", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                else Text(foundName.take(1).uppercase().ifBlank { "?" }, color = Red, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.width(11.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(foundName.ifBlank { foundUsername }, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                Text("@$foundUsername", color = Muted, fontSize = 12.sp)
+                            }
+                            Text("›", color = Red, fontSize = 24.sp)
+                        }
+                    }
+                    if (!searching && targetUsername.trim().removePrefix("@").length >= 2 && foundUid.isBlank()) {
+                        Text("Пользователь не найден", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                    }
+                }
+            }
             if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Red)
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(17.dp))
             if (chats.isEmpty()) {
-                Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(Modifier.size(58.dp).background(Bg, CircleShape), contentAlignment = Alignment.Center) {
+                Column(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(58.dp).background(Panel, CircleShape), contentAlignment = Alignment.Center) {
                         Text("✉", color = Red, fontSize = 27.sp)
                     }
                     Spacer(Modifier.height(12.dp))
@@ -645,43 +780,33 @@ private fun ChatList(
                     Text("Найди человека по username и начни диалог.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
                 }
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(1.dp), contentPadding = PaddingValues(bottom = 90.dp)) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(0.dp), contentPadding = PaddingValues(bottom = 90.dp)) {
                     items(chats, key = { it.id }) { chat ->
-                        Row(Modifier.fillMaxWidth().background(Panel).clickable { onOpenChat(chat) }.padding(horizontal = 12.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(52.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
+                        Row(
+                            Modifier.fillMaxWidth().clickable { onOpenChat(chat) }.padding(horizontal = 3.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(Modifier.size(54.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
                                 Text(chat.title.take(1).uppercase(), color = Red, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                             }
                             Spacer(Modifier.width(13.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(chat.title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                Text(chat.title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                 Text(chat.lastMessage.ifBlank { "Начните переписку" }, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 1)
                             }
+                            if (chat.isMuted) Text("🔕", fontSize = 13.sp, modifier = Modifier.padding(start = 7.dp))
+                            if (chat.isBlocked) Text("⊘", color = Color(0xFFE05260), fontSize = 16.sp, modifier = Modifier.padding(start = 7.dp))
                         }
+                        HorizontalDivider(color = Divider.copy(alpha = 0.65f), modifier = Modifier.padding(start = 67.dp))
                     }
                 }
             }
         }
         FloatingActionButton(
-            onClick = { showAdd = true },
+            onClick = { showAdd = !showAdd; if (!showAdd) targetUsername = "" },
             modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(22.dp),
             containerColor = Red, contentColor = Color.White, shape = CircleShape
-        ) { Text("+", fontSize = 30.sp, fontWeight = FontWeight.Normal) }
-    }
-    if (showAdd) {
-        AlertDialog(
-            onDismissRequest = { showAdd = false },
-            title = { Text("Новое сообщение", color = Ink) },
-            text = {
-                Column {
-                    Text("Найди человека по его username в NeuroGram.", color = Muted, fontSize = 13.sp)
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(value = targetUsername, onValueChange = { targetUsername = it }, label = { Text("@username") }, singleLine = true)
-                }
-            },
-            confirmButton = { TextButton(onClick = { showAdd = false; onAddChat(targetUsername) }) { Text("Найти", color = Red) } },
-            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Отмена", color = Muted) } },
-            containerColor = Panel
-        )
+        ) { Text(if (showAdd) "×" else "+", fontSize = 28.sp, fontWeight = FontWeight.Normal) }
     }
 }
 
@@ -698,9 +823,15 @@ private fun ChatScreen(
     var otherDisplayName by remember(otherUid) { mutableStateOf("") }
     var presenceOnline by remember(otherUid) { mutableStateOf(false) }
     var presenceLastSeen by remember(otherUid) { mutableStateOf<com.google.firebase.Timestamp?>(null) }
+    var menuExpanded by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showBlockConfirm by remember { mutableStateOf(false) }
+    var isMuted by remember(chatId) { mutableStateOf(false) }
+    var blockedBy by remember(chatId) { mutableStateOf<List<String>>(emptyList()) }
+    val isBlockedByMe = blockedBy.contains(myUid)
+    val isBlockedByOther = blockedBy.contains(otherUid)
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
-    // App-wide presence is handled by MainActivity lifecycle callbacks.
     DisposableEffect(otherUid) {
         val otherListener = db.collection("publicProfiles").document(otherUid)
             .addSnapshotListener { doc, exception ->
@@ -717,10 +848,17 @@ private fun ChatScreen(
     }
 
     DisposableEffect(chatId) {
-        val listener = db.collection("chats").document(chatId).collection("messages")
-            .orderBy("createdAt")
-            .addSnapshotListener { snapshot, exception ->
-                if (exception != null) error = "Не удалось загрузить сообщения: ${exception.localizedMessage}"
+        val chatRef = db.collection("chats").document(chatId)
+        val chatListener = chatRef.addSnapshotListener { doc, exception ->
+            if (exception == null && doc != null && doc.exists()) {
+                val mutedFor = doc.get("mutedFor") as? List<*> ?: emptyList<Any>()
+                isMuted = mutedFor.contains(myUid)
+                blockedBy = (doc.get("blockedBy") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+            }
+        }
+        val listener = chatRef.collection("messages").orderBy("createdAt")
+            .addSnapshotListener { snapshot, messageException ->
+                if (messageException != null) error = "Не удалось загрузить сообщения: ${messageException.localizedMessage}"
                 else {
                     val docs = snapshot?.documents ?: emptyList()
                     messages = docs.map { doc ->
@@ -734,7 +872,7 @@ private fun ChatScreen(
                     if (changed) batch.commit()
                 }
             }
-        onDispose { listener.remove() }
+        onDispose { chatListener.remove(); listener.remove() }
     }
 
     LaunchedEffect(messages.size) {
@@ -750,13 +888,11 @@ private fun ChatScreen(
     }
 
     Column(Modifier.fillMaxSize().background(Bg).statusBarsPadding().imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(14.dp)).padding(horizontal = 9.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(17.dp)).padding(horizontal = 9.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("‹", color = Red, fontSize = 27.sp, modifier = Modifier.clickable(onClick = onBack).padding(horizontal = 5.dp))
             Box(Modifier.size(38.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
-                if (otherAvatar.isNotBlank()) {
-                    AsyncImage(model = otherAvatar, contentDescription = "Аватар собеседника",
-                        modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                } else Text((otherUsername.ifBlank { title }).take(1).uppercase(), color = Red, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                if (otherAvatar.isNotBlank()) AsyncImage(model = otherAvatar, contentDescription = "Аватар собеседника", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                else Text((otherUsername.ifBlank { title }).take(1).uppercase(), color = Red, fontWeight = FontWeight.Bold, fontSize = 17.sp)
             }
             Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f).clickable(onClick = onViewProfile)) {
@@ -772,7 +908,33 @@ private fun ChatScreen(
                 } ?: "Не в сети"
                 Text(status, color = if (presenceOnline) Color(0xFF2EAD68) else Muted, fontSize = 10.sp, maxLines = 1)
             }
-            Text("⋮", color = Red, fontSize = 21.sp, modifier = Modifier.clickable(onClick = onViewProfile).padding(horizontal = 5.dp))
+            Box {
+                Text("⋮", color = Red, fontSize = 22.sp, modifier = Modifier.clickable { menuExpanded = true }.padding(horizontal = 7.dp, vertical = 4.dp))
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text(if (isMuted) "Включить уведомления" else "Выключить уведомления") },
+                        onClick = {
+                            menuExpanded = false
+                            val field = if (isMuted) FieldValue.arrayRemove(myUid) else FieldValue.arrayUnion(myUid)
+                            db.collection("chats").document(chatId).update("mutedFor", field)
+                                .addOnFailureListener { error = "Не удалось изменить уведомления: ${it.localizedMessage}" }
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Удалить чат", color = Color(0xFFE05260)) },
+                        onClick = { menuExpanded = false; showDeleteConfirm = true }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (isBlockedByMe) "Разблокировать" else "Заблокировать", color = if (isBlockedByMe) Ink else Color(0xFFE05260)) },
+                        onClick = { menuExpanded = false; if (isBlockedByMe) db.collection("chats").document(chatId).update("blockedBy", FieldValue.arrayRemove(myUid)) else showBlockConfirm = true }
+                    )
+                }
+            }
+        }
+        if (isBlockedByMe) {
+            Text("Вы заблокировали этого пользователя. Отправка сообщений отключена.", color = Color(0xFFE05260), fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(10.dp))
+        } else if (isBlockedByOther) {
+            Text("Этот пользователь ограничил переписку.", color = Muted, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(10.dp))
         }
         if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp)
         LazyColumn(
@@ -783,15 +945,11 @@ private fun ChatScreen(
             items(messages, key = { it.id }) { message ->
                 val mine = message.senderId == myUid
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
-                    Text(
-                        if (mine) "Вы" else message.senderName,
-                        color = Muted, fontSize = 10.sp,
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp)
-                    )
+                    Text(if (mine) "Вы" else message.senderName, color = Muted, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp))
                     Text(
                         message.text, color = if (mine) Color.White else Ink, fontSize = 14.sp * appMessageScale,
                         modifier = Modifier.widthIn(max = 290.dp)
-                            .background(if (mine) Red else Panel, RoundedCornerShape(17.dp))
+                            .then(if (mine) Modifier.background(Red, RoundedCornerShape(17.dp)) else Modifier.glassSurface(RoundedCornerShape(17.dp)))
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                     )
                     if (mine) Text(
@@ -802,22 +960,26 @@ private fun ChatScreen(
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth(0.94f).align(Alignment.CenterHorizontally)
+                .glassSurface(RoundedCornerShape(22.dp)).padding(5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             OutlinedTextField(
                 value = draft, onValueChange = { draft = it },
                 modifier = Modifier.weight(1f), placeholder = { Text("Сообщение…", color = Muted) },
-                shape = RoundedCornerShape(15.dp), maxLines = 4,
+                shape = RoundedCornerShape(17.dp), maxLines = 4,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent,
                     focusedTextColor = Ink, unfocusedTextColor = Ink, cursorColor = Red,
-                    focusedContainerColor = Panel, unfocusedContainerColor = Panel
+                    focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent
                 )
             )
-            Spacer(Modifier.width(5.dp))
+            Spacer(Modifier.width(4.dp))
             Button(
                 onClick = {
                     val text = draft.trim()
-                    if (text.isNotEmpty()) {
+                    if (text.isNotEmpty() && !isBlockedByMe && !isBlockedByOther) {
                         draft = ""
                         val chatRef = db.collection("chats").document(chatId)
                         chatRef.collection("messages").add(mapOf(
@@ -828,12 +990,43 @@ private fun ChatScreen(
                         chatRef.update("lastMessage", text, "updatedAt", FieldValue.serverTimestamp())
                     }
                 },
-                enabled = draft.isNotBlank(),
+                enabled = draft.isNotBlank() && !isBlockedByMe && !isBlockedByOther,
                 colors = ButtonDefaults.buttonColors(containerColor = Red),
                 shape = CircleShape, contentPadding = PaddingValues(14.dp)
             ) { Text("➤", color = Color.White) }
         }
     }
+
+    if (showDeleteConfirm) AlertDialog(
+        onDismissRequest = { showDeleteConfirm = false },
+        title = { Text("Удалить чат?", color = Ink) },
+        text = { Text("Чат исчезнет из вашего списка. У собеседника он останется.", color = Muted) },
+        confirmButton = {
+            TextButton(onClick = {
+                showDeleteConfirm = false
+                db.collection("chats").document(chatId).update("hiddenFor", FieldValue.arrayUnion(myUid))
+                    .addOnSuccessListener { onBack() }
+                    .addOnFailureListener { error = "Не удалось удалить чат: ${it.localizedMessage}" }
+            }) { Text("Удалить", color = Color(0xFFE05260)) }
+        },
+        dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Отмена", color = Muted) } },
+        containerColor = Panel
+    )
+
+    if (showBlockConfirm) AlertDialog(
+        onDismissRequest = { showBlockConfirm = false },
+        title = { Text("Заблокировать пользователя?", color = Ink) },
+        text = { Text("Вы не сможете отправлять сообщения в этом чате, пока не снимете блокировку.", color = Muted) },
+        confirmButton = {
+            TextButton(onClick = {
+                showBlockConfirm = false
+                db.collection("chats").document(chatId).update("blockedBy", FieldValue.arrayUnion(myUid))
+                    .addOnFailureListener { error = "Не удалось заблокировать: ${it.localizedMessage}" }
+            }) { Text("Заблокировать", color = Color(0xFFE05260)) }
+        },
+        dismissButton = { TextButton(onClick = { showBlockConfirm = false }) { Text("Отмена", color = Muted) } },
+        containerColor = Panel
+    )
 }
 
 @Composable
