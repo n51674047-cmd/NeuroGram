@@ -46,7 +46,7 @@ jobs:
 
       - name: Read app version
         id: app_version
-        run: echo "version=$(sed -n 's/.*versionName = "\\([^"]*\\)".*/\\1/p' app/build.gradle.kts)" >> "$GITHUB_OUTPUT"
+        run: VERSION=$(grep versionName app/build.gradle.kts | cut -d '"' -f2); echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Publish update release
         uses: softprops/action-gh-release@v2
