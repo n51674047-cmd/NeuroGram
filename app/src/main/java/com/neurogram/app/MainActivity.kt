@@ -62,6 +62,19 @@ private val Ink: Color get() = if (appDarkTheme) Color(0xFFF0F5FF) else Color(0x
 private val Divider: Color get() = if (appDarkTheme) Color(0xFF29364A) else Color(0xFFE3EAF4)
 
 class MainActivity : ComponentActivity() {
+    private fun updatePresence(online: Boolean) {
+        val user = FirebaseAuth.getInstance().currentUser ?: return
+        val data = mapOf("online" to online, "lastSeen" to FieldValue.serverTimestamp())
+        val db = FirebaseFirestore.getInstance()
+        db.runBatch { batch ->
+            batch.set(db.collection("publicProfiles").document(user.uid), data, com.google.firebase.firestore.SetOptions.merge())
+            batch.set(db.collection("users").document(user.uid), data, com.google.firebase.firestore.SetOptions.merge())
+        }
+    }
+
+    override fun onStart() { super.onStart(); updatePresence(true) }
+    override fun onStop() { updatePresence(false); super.onStop() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -667,40 +680,25 @@ private fun ChatScreen(
     var error by remember(chatId) { mutableStateOf("") }
     var otherAvatar by remember(otherUid) { mutableStateOf("") }
     var otherUsername by remember(otherUid) { mutableStateOf("") }
+    var otherDisplayName by remember(otherUid) { mutableStateOf("") }
     var presenceOnline by remember(otherUid) { mutableStateOf(false) }
     var presenceLastSeen by remember(otherUid) { mutableStateOf<com.google.firebase.Timestamp?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
-    // Basic Firestore presence while this conversation is open.
-    DisposableEffect(myUid, otherUid) {
-        val handler = Handler(Looper.getMainLooper())
-        val myProfile = db.collection("publicProfiles").document(myUid)
-        val heartbeat = object : Runnable {
-            override fun run() {
-                val data = mapOf("online" to true, "lastSeen" to FieldValue.serverTimestamp())
-                myProfile.set(data, com.google.firebase.firestore.SetOptions.merge())
-                db.collection("users").document(myUid).set(data, com.google.firebase.firestore.SetOptions.merge())
-                handler.postDelayed(this, 30_000L)
-            }
-        }
-        heartbeat.run()
+    // App-wide presence is handled by MainActivity lifecycle callbacks.
+    DisposableEffect(otherUid) {
         val otherListener = db.collection("publicProfiles").document(otherUid)
             .addSnapshotListener { doc, exception ->
                 if (exception == null && doc != null && doc.exists()) {
                     otherAvatar = doc.getString("avatarUrl") ?: ""
                     otherUsername = doc.getString("username") ?: doc.getString("nickname") ?: ""
+                    otherDisplayName = doc.getString("displayName") ?: otherUsername
                     presenceLastSeen = doc.getTimestamp("lastSeen")
-                    val fresh = presenceLastSeen?.toDate()?.let { System.currentTimeMillis() - it.time < 75_000L } == true
+                    val fresh = presenceLastSeen?.toDate()?.let { System.currentTimeMillis() - it.time < 90_000L } == true
                     presenceOnline = doc.getBoolean("online") == true && fresh
                 }
             }
-        onDispose {
-            handler.removeCallbacks(heartbeat)
-            val offline = mapOf("online" to false, "lastSeen" to FieldValue.serverTimestamp())
-            myProfile.set(offline, com.google.firebase.firestore.SetOptions.merge())
-            db.collection("users").document(myUid).set(offline, com.google.firebase.firestore.SetOptions.merge())
-            otherListener.remove()
-        }
+        onDispose { otherListener.remove() }
     }
 
     DisposableEffect(chatId) {
@@ -747,7 +745,7 @@ private fun ChatScreen(
             }
             Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f).clickable(onClick = onViewProfile)) {
-                Text(otherUsername.ifBlank { title }, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(otherDisplayName.ifBlank { otherUsername.ifBlank { title } }, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 val status = if (presenceOnline) "В сети" else presenceLastSeen?.toDate()?.let { date ->
                     val now = java.util.Calendar.getInstance()
                     val then = java.util.Calendar.getInstance().apply { time = date }
@@ -826,6 +824,8 @@ private fun ChatScreen(
 @Composable
 private fun PublicProfileScreen(uid: String, db: FirebaseFirestore, onBack: () -> Unit) {
     var username by remember(uid) { mutableStateOf("") }
+    var displayName by remember(uid) { mutableStateOf("") }
+    var editDisplayName by remember(uid) { mutableStateOf("") }
     var bio by remember(uid) { mutableStateOf("") }
     var avatarUrl by remember(uid) { mutableStateOf("") }
     var loading by remember(uid) { mutableStateOf(true) }
@@ -896,9 +896,11 @@ private fun ProfileScreen(
     LaunchedEffect(uid) {
         if (uid.isNotBlank()) db.collection("users").document(uid).get().addOnSuccessListener { doc ->
             username = doc.getString("username") ?: doc.getString("nickname") ?: ""
+            displayName = doc.getString("displayName") ?: username
             bio = doc.getString("bio") ?: ""
             avatarUrl = doc.getString("avatarUrl") ?: ""
             editUsername = username
+            editDisplayName = displayName
             editBio = bio
         }.addOnFailureListener { message = "Не удалось загрузить профиль: ${it.localizedMessage}" }
     }
@@ -928,6 +930,8 @@ private fun ProfileScreen(
     fun saveProfileChanges() {
         val nextUsername = editUsername.trim().removePrefix("@").lowercase()
         val nextBio = editBio.trim()
+        val nextDisplayName = editDisplayName.trim()
+        if (nextDisplayName.isBlank() || nextDisplayName.length > 40) { message = "Имя: от 1 до 40 символов"; return }
         if (!Regex("^[a-z0-9_]{5,20}$").matches(nextUsername)) { message = "Username: 5–20 символов, латиница, цифры и _"; return }
         if (nextBio.length > 160) { message = "Описание не должно быть длиннее 160 символов"; return }
         loading = true
@@ -942,12 +946,12 @@ private fun ProfileScreen(
             transaction.set(newRef, mapOf("uid" to uid))
             if (oldRef != null && oldDoc?.exists() == true && oldDoc.getString("uid") == uid) transaction.delete(oldRef)
             val common = mapOf("uid" to uid, "username" to nextUsername, "usernameLower" to nextUsername,
-                "nickname" to nextUsername, "bio" to nextBio, "avatarUrl" to avatarUrl)
+                "nickname" to nextUsername, "displayName" to nextDisplayName, "bio" to nextBio, "avatarUrl" to avatarUrl)
             transaction.set(db.collection("users").document(uid), common, com.google.firebase.firestore.SetOptions.merge())
             transaction.set(db.collection("publicProfiles").document(uid), common, com.google.firebase.firestore.SetOptions.merge())
             null
         }.addOnSuccessListener {
-            username = nextUsername; bio = nextBio; editUsername = nextUsername; editBio = nextBio
+            username = nextUsername; displayName = nextDisplayName; bio = nextBio; editUsername = nextUsername; editDisplayName = nextDisplayName; editBio = nextBio
             onUsernameChanged(nextUsername); loading = false; showEdit = false; message = "Профиль сохранён"
         }.addOnFailureListener { loading = false; message = it.localizedMessage ?: "Не удалось сохранить профиль" }
     }
@@ -968,11 +972,12 @@ private fun ProfileScreen(
             }
         }
         Spacer(Modifier.height(22.dp))
-        Text("@${username.ifBlank { "username" }}", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text(displayName.ifBlank { username }, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Text("@${username.ifBlank { "username" }}", color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
         Text(email, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
         Text(bio.ifBlank { "Добавь описание профиля" }, color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 14.dp))
         Spacer(Modifier.height(20.dp))
-        OutlinedButton(onClick = { editUsername = username; editBio = bio; showEdit = true }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("Изменить профиль", color = Red) }
+        OutlinedButton(onClick = { editUsername = username; editDisplayName = displayName; editBio = bio; showEdit = true }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("Изменить профиль", color = Red) }
         OutlinedButton(onClick = onSettings, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("⚙  Настройки", color = Red) }
         if (message.isNotBlank()) Text(message, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Red)
@@ -985,6 +990,8 @@ private fun ProfileScreen(
         title = { Text("Редактировать профиль", color = Ink) },
         text = {
             Column {
+                OutlinedTextField(value = editDisplayName, onValueChange = { editDisplayName = it.take(40) }, label = { Text("Имя") }, singleLine = true)
+                Spacer(Modifier.height(10.dp))
                 OutlinedTextField(value = editUsername, onValueChange = { editUsername = it }, label = { Text("Username") }, prefix = { Text("@") }, singleLine = true)
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(value = editBio, onValueChange = { editBio = it.take(160) }, label = { Text("Описание") }, minLines = 3, maxLines = 4)
