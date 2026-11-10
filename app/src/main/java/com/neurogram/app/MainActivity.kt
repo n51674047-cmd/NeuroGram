@@ -826,6 +826,7 @@ private fun ChatScreen(
     var otherDisplayName by remember(otherUid) { mutableStateOf("") }
     var presenceOnline by remember(otherUid) { mutableStateOf(false) }
     var presenceLastSeen by remember(otherUid) { mutableStateOf<com.google.firebase.Timestamp?>(null) }
+    var otherTyping by remember(otherUid) { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showBlockConfirm by remember { mutableStateOf(false) }
@@ -857,6 +858,9 @@ private fun ChatScreen(
                 val mutedFor = doc.get("mutedFor") as? List<*> ?: emptyList<Any>()
                 isMuted = mutedFor.contains(myUid)
                 blockedBy = (doc.get("blockedBy") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                val typingAt = doc.get("typingAt") as? Map<*, *> ?: emptyMap<Any, Any>()
+                val typingTime = typingAt[otherUid] as? com.google.firebase.Timestamp
+                otherTyping = typingTime?.toDate()?.let { System.currentTimeMillis() - it.time < 6500L } == true
             }
         }
         val listener = chatRef.collection("messages").orderBy("createdAt")
@@ -875,7 +879,23 @@ private fun ChatScreen(
                     if (changed) batch.commit()
                 }
             }
-        onDispose { chatListener.remove(); listener.remove() }
+        onDispose {
+            chatListener.remove()
+            listener.remove()
+            chatRef.update("typingAt.$myUid", FieldValue.delete())
+        }
+    }
+
+    LaunchedEffect(draft.isNotBlank(), chatId) {
+        val chatRef = db.collection("chats").document(chatId)
+        if (draft.isBlank()) {
+            chatRef.update("typingAt.$myUid", FieldValue.delete())
+        } else {
+            while (true) {
+                chatRef.update("typingAt.$myUid", FieldValue.serverTimestamp())
+                delay(2500)
+            }
+        }
     }
 
     LaunchedEffect(messages.size) {
@@ -909,7 +929,11 @@ private fun ChatScreen(
                         "Был(а) сегодня в " + time
                     else "Был(а) " + java.text.SimpleDateFormat("dd.MM.yyyy в HH:mm", java.util.Locale.getDefault()).format(date)
                 } ?: "Не в сети"
-                Text(status, color = if (presenceOnline) Color(0xFF2EAD68) else Muted, fontSize = 10.sp, maxLines = 1)
+                Text(
+                    if (otherTyping) "••• печатает" else status,
+                    color = if (otherTyping) Red else if (presenceOnline) Color(0xFF2EAD68) else Muted,
+                    fontSize = 10.sp, maxLines = 1
+                )
             }
             Box {
                 Text("⋮", color = Red, fontSize = 22.sp, modifier = Modifier.clickable { menuExpanded = true }.padding(horizontal = 7.dp, vertical = 4.dp))
