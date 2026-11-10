@@ -1,6 +1,11 @@
 package com.neurogram.app
 
 import android.os.Bundle
+import android.app.DownloadManager
+import android.content.Intent
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import android.app.Activity
 import android.content.ContextWrapper
 import android.os.Handler
@@ -124,6 +129,19 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private data class UpdateInfo(val version: String, val apkUrl: String)
+
+private fun isNewerVersion(remote: String, current: String): Boolean {
+    val r = remote.split(".").map { it.toIntOrNull() ?: 0 }
+    val c = current.split(".").map { it.toIntOrNull() ?: 0 }
+    for (i in 0 until maxOf(r.size, c.size)) {
+        val a = r.getOrElse(i) { 0 }
+        val b = c.getOrElse(i) { 0 }
+        if (a != b) return a > b
+    }
+    return false
+}
+
 private data class ChatItem(
     val id: String,
     val title: String,
@@ -212,6 +230,95 @@ private fun NovixGramApp() {
     var selectedChatTitle by remember { mutableStateOf("") }
     var selectedOtherUid by remember { mutableStateOf("") }
     var chats by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
+    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+    var updateDownloading by remember { mutableStateOf(false) }
+    var downloadedUpdateId by remember { mutableLongStateOf(-1L) }
+
+    LaunchedEffect(Unit) {
+        thread {
+            var connection: HttpURLConnection? = null
+            try {
+                connection = (URL("https://api.github.com/repos/n51674047-cmd/NeuroGram/releases/latest").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 12000
+                    readTimeout = 12000
+                    setRequestProperty("Accept", "application/vnd.github+json")
+                    setRequestProperty("User-Agent", "NovixGram-Android")
+                }
+                if (connection.responseCode in 200..299) {
+                    val release = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    val version = release.optString("tag_name").removePrefix("v")
+                    val apk = release.optJSONArray("assets")
+                    var apkUrl = ""
+                    if (apk != null) for (i in 0 until apk.length()) {
+                        val asset = apk.optJSONObject(i) ?: continue
+                        if (asset.optString("name").endsWith(".apk", true)) {
+                            apkUrl = asset.optString("browser_download_url")
+                            break
+                        }
+                    }
+                    if (version.isNotBlank() && apkUrl.isNotBlank() && isNewerVersion(version, "0.2.2")) {
+                        Handler(Looper.getMainLooper()).post { updateInfo = UpdateInfo(version, apkUrl) }
+                    }
+                }
+            } catch (_: Exception) {
+            } finally { connection?.disconnect() }
+        }
+    }
+
+    fun installOrDownloadUpdate() {
+        val info = updateInfo ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
+            context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        }
+        val manager = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as DownloadManager
+        if (downloadedUpdateId >= 0L) {
+            val query = DownloadManager.Query().setFilterById(downloadedUpdateId)
+            manager.query(query).use { cursor ->
+                if (cursor != null && cursor.moveToFirst() && cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) == DownloadManager.STATUS_SUCCESSFUL) {
+                    val apkUri = manager.getUriForDownloadedFile(downloadedUpdateId)
+                    if (apkUri != null) {
+                        val installIntent = Intent(Intent.ACTION_VIEW).setDataAndType(apkUri, "application/vnd.android.package-archive")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(installIntent)
+                        return
+                    }
+                }
+            }
+            downloadedUpdateId = -1L
+        }
+        if (!updateDownloading) {
+            updateDownloading = true
+            val request = DownloadManager.Request(Uri.parse(info.apkUrl))
+                .setTitle("NovixGram ${info.version}")
+                .setDescription("Загрузка обновления")
+                .setMimeType("application/vnd.android.package-archive")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, "NovixGram-${info.version}.apk")
+            downloadedUpdateId = manager.enqueue(request)
+            thread {
+                var finished = false
+                while (!finished) {
+                    Thread.sleep(1000)
+                    val q = DownloadManager.Query().setFilterById(downloadedUpdateId)
+                    manager.query(q).use { cursor ->
+                        if (cursor != null && cursor.moveToFirst()) {
+                            val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                            if (status == DownloadManager.STATUS_SUCCESSFUL || status == DownloadManager.STATUS_FAILED) {
+                                finished = true
+                                Handler(Looper.getMainLooper()).post {
+                                    updateDownloading = false
+                                    if (status == DownloadManager.STATUS_SUCCESSFUL) installOrDownloadUpdate()
+                                }
+                            }
+                        } else finished = true
+                    }
+                }
+                if (finished) Handler(Looper.getMainLooper()).post { updateDownloading = false }
+            }
+        }
+    }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
 
@@ -675,6 +782,7 @@ private fun AuthField(
 @Composable
 private fun ChatList(
     userLabel: String, chats: List<ChatItem>, error: String, loading: Boolean,
+    updateInfo: UpdateInfo?, updateDownloading: Boolean, onUpdate: () -> Unit,
     onAddChat: (String) -> Unit, onOpenChat: (ChatItem) -> Unit,
     onProfile: () -> Unit, onMenu: () -> Unit
 ) {
@@ -725,6 +833,23 @@ private fun ChatList(
             Column {
                 Text("Чаты", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
                 Text(userLabel, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+            AnimatedVisibility(visible = updateInfo != null, enter = fadeIn(tween(220)) + slideInVertically(tween(220))) {
+                Row(
+                    Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(16.dp))
+                        .clickable(enabled = !updateDownloading, onClick = onUpdate)
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("⬆", color = Red, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Доступно обновление ${updateInfo?.version}", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        Text(if (updateDownloading) "Загружаем APK…" else "Нажми, чтобы скачать и установить", color = Muted, fontSize = 11.sp)
+                    }
+                    Text(if (updateDownloading) "…" else "Обновить", color = Red, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(14.dp))
             }
             Spacer(Modifier.height(18.dp))
             Row(Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(15.dp)).padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
