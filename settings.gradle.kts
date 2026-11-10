@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "NeuroGram"
+rootProject.name = "NovixGram"
 include(":app")
