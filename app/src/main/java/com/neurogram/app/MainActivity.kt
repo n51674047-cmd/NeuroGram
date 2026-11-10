@@ -684,8 +684,8 @@ private fun ChatList(
             searching = false
             return@LaunchedEffect
         }
-        delay(300)
         searching = true
+        delay(300)
         FirebaseFirestore.getInstance().collection("publicProfiles")
             .whereEqualTo("usernameLower", clean).limit(1).get()
             .addOnSuccessListener { result ->
@@ -729,7 +729,7 @@ private fun ChatList(
                     Text("Новое сообщение", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
-                        value = targetUsername, onValueChange = { targetUsername = it },
+                        value = targetUsername, onValueChange = { targetUsername = it.removePrefix("@") },
                         modifier = Modifier.fillMaxWidth(), singleLine = true,
                         placeholder = { Text("@username", color = Muted) },
                         prefix = { Text("@", color = Red) },
