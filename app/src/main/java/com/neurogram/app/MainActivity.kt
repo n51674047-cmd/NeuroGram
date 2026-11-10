@@ -666,6 +666,7 @@ private fun ChatScreen(
     var draft by remember(chatId) { mutableStateOf("") }
     var error by remember(chatId) { mutableStateOf("") }
     var otherAvatar by remember(otherUid) { mutableStateOf("") }
+    var otherUsername by remember(otherUid) { mutableStateOf("") }
     var presenceOnline by remember(otherUid) { mutableStateOf(false) }
     var presenceLastSeen by remember(otherUid) { mutableStateOf<com.google.firebase.Timestamp?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -687,6 +688,7 @@ private fun ChatScreen(
             .addSnapshotListener { doc, exception ->
                 if (exception == null && doc != null && doc.exists()) {
                     otherAvatar = doc.getString("avatarUrl") ?: ""
+                    otherUsername = doc.getString("username") ?: doc.getString("nickname") ?: ""
                     presenceLastSeen = doc.getTimestamp("lastSeen")
                     val fresh = presenceLastSeen?.toDate()?.let { System.currentTimeMillis() - it.time < 75_000L } == true
                     presenceOnline = doc.getBoolean("online") == true && fresh
@@ -741,11 +743,11 @@ private fun ChatScreen(
                 if (otherAvatar.isNotBlank()) {
                     AsyncImage(model = otherAvatar, contentDescription = "Аватар собеседника",
                         modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                } else Text(title.take(1).uppercase(), color = Red, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                } else Text((otherUsername.ifBlank { title }).take(1).uppercase(), color = Red, fontWeight = FontWeight.Bold, fontSize = 17.sp)
             }
             Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f).clickable(onClick = onViewProfile)) {
-                Text(title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(otherUsername.ifBlank { title }, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 val status = if (presenceOnline) "В сети" else presenceLastSeen?.toDate()?.let { date ->
                     val now = java.util.Calendar.getInstance()
                     val then = java.util.Calendar.getInstance().apply { time = date }
