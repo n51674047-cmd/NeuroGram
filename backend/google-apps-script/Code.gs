@@ -44,14 +44,14 @@ function sendCode(email) {
     lock.releaseLock();
   }
   try {
-    GmailApp.sendEmail(email, "Код подтверждения NeuroGram",
+    MailApp.sendEmail(email, "Код подтверждения NeuroGram",
       "Твой код подтверждения NeuroGram: " + code + "\n\nКод действует 10 минут. Никому его не сообщай.",
       { htmlBody: '<div style="font-family:Arial,sans-serif;padding:24px;color:#17243a"><h2>NeuroGram</h2><p>Код подтверждения почты:</p><div style="font-size:34px;font-weight:bold;letter-spacing:10px;padding:16px 0">' + code + '</div><p>Код действует 10 минут. Никому его не сообщай.</p></div>' });
     return output(true, "Код отправлен на " + email + ".");
   } catch (err) {
     props.deleteProperty(key);
     console.error(err);
-    return output(false, "Не удалось отправить письмо. Проверь разрешения Gmail у Apps Script.");
+    return output(false, "Не удалось отправить письмо. Проверь разрешение на отправку почты у Apps Script.");
   }
 }
 
