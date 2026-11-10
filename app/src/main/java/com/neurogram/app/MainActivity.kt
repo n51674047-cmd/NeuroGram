@@ -401,7 +401,8 @@ private fun NeuroGramApp() {
                     "members" to members,
                     "memberNames" to names,
                     "lastMessage" to "",
-                    "updatedAt" to FieldValue.serverTimestamp()
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                    "hiddenFor" to FieldValue.arrayRemove(me.uid)
                 )
                 db.collection("chats").document(chatId).set(data, com.google.firebase.firestore.SetOptions.merge())
                     .addOnSuccessListener {
