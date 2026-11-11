@@ -1,4 +1,4 @@
-name: Build NovixGram APK
+name: Build NeuroGram APK
 
 on:
   push:
@@ -25,15 +25,20 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      # Keep one debug signing key across workflow runs so APK updates install over the previous version.
+      # Gradle actually stores the debug key in this XDG Android user directory on GitHub runners.
+      # Keep this exact file cached so every future APK is signed with the same certificate.
       - name: Restore persistent debug signing key
+        id: signing_key
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: novixgram-debug-keystore-v1
+          path: /home/runner/.config/.android/debug.keystore
+          key: neurogram-debug-signing-key-v1
 
       - name: Build debug APK
         run: gradle assembleDebug
+
+      - name: Verify persistent signing key exists
+        run: test -s /home/runner/.config/.android/debug.keystore
 
       - name: Print debug signing fingerprints
         run: gradle signingReport
@@ -41,7 +46,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NovixGram-debug
+          name: NeuroGram-debug
           path: app/build/outputs/apk/debug/app-debug.apk
 
       - name: Read app version
@@ -52,6 +57,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.app_version.outputs.version }}
-          name: NovixGram ${{ steps.app_version.outputs.version }}
+          name: NeuroGram ${{ steps.app_version.outputs.version }}
           make_latest: true
           files: app/build/outputs/apk/debug/app-debug.apk
