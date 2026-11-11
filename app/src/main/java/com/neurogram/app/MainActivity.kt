@@ -26,6 +26,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -158,7 +159,8 @@ private data class MessageItem(
     val text: String,
     val delivered: Boolean,
     val read: Boolean,
-    val pending: Boolean = false
+    val pending: Boolean = false,
+    val createdAt: com.google.firebase.Timestamp? = null
 )
 
 @Composable
@@ -947,6 +949,7 @@ private fun ChatList(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatScreen(
     chatId: String, title: String, myUid: String, otherUid: String, myName: String,
@@ -1003,7 +1006,7 @@ private fun ChatScreen(
                 else {
                     val docs = snapshot?.documents ?: emptyList()
                     messages = docs.map { doc ->
-                        MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "", doc.getTimestamp("deliveredAt") != null, doc.getTimestamp("readAt") != null, doc.metadata.hasPendingWrites())
+                        MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "", doc.getTimestamp("deliveredAt") != null, doc.getTimestamp("readAt") != null, doc.metadata.hasPendingWrites(), doc.getTimestamp("createdAt") ?: doc.getTimestamp("clientCreatedAt"))
                     }
                     val batch = db.batch()
                     var changed = false
@@ -1098,42 +1101,83 @@ private fun ChatScreen(
             Text("Этот пользователь ограничил переписку.", color = Muted, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(10.dp))
         }
         if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp)
+        val groupedMessages = messages.groupBy { message ->
+            message.createdAt?.toDate()?.let {
+                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(it)
+            } ?: "unknown"
+        }.toList()
+
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
-            items(messages, key = { it.id }) { message ->
-                val mine = message.senderId == myUid
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
-                    Text(if (mine) "Вы" else message.senderName, color = Muted, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp))
-                    Row(
-                        modifier = Modifier.widthIn(max = 290.dp)
-                            .then(if (mine) Modifier.background(Red, RoundedCornerShape(17.dp)) else Modifier.glassSurface(RoundedCornerShape(17.dp)))
-                            .padding(start = 14.dp, end = 10.dp, top = 9.dp, bottom = 7.dp),
-                        verticalAlignment = Alignment.Bottom
+            groupedMessages.forEach { (dateKey, dayMessages) ->
+                stickyHeader(key = "date-$dateKey") {
+                    Box(
+                        Modifier.fillMaxWidth().background(Bg.copy(alpha = 0.96f)).padding(vertical = 5.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            message.text, color = if (mine) Color.White else Ink,
-                            fontSize = 14.sp * appMessageScale,
-                            modifier = Modifier.weight(1f, fill = false)
+                            if (dateKey == "unknown") "Дата неизвестна" else
+                                java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale("ru")).format(
+                                    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).parse(dateKey)!!
+                                ),
+                            color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.background(Panel, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 12.dp, vertical = 5.dp)
                         )
-                        if (mine) {
-                            Spacer(Modifier.width(7.dp))
-                            Text(
-                                when {
-                                    message.pending -> "◷"
-                                    message.read || message.delivered -> "✓✓"
-                                    else -> "✓"
-                                },
-                                color = when {
-                                    message.pending -> Color.White.copy(alpha = 0.72f)
-                                    message.read -> Color(0xFF64B5F6)
-                                    else -> Color.White.copy(alpha = 0.78f)
-                                },
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(bottom = 0.dp)
-                            )
+                    }
+                }
+                items(dayMessages, key = { it.id }) { message ->
+                    val mine = message.senderId == myUid
+                    val timeLabel = message.createdAt?.toDate()?.let {
+                        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(it)
+                    } ?: if (message.pending) "…" else "--:--"
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 8 }
+                    ) {
+                        Column(
+                            Modifier.fillMaxWidth().animateContentSize(),
+                            horizontalAlignment = if (mine) Alignment.End else Alignment.Start
+                        ) {
+                            Row(
+                                modifier = Modifier.widthIn(max = 290.dp)
+                                    .then(if (mine) Modifier.background(Red, RoundedCornerShape(17.dp)) else Modifier.glassSurface(RoundedCornerShape(17.dp)))
+                                    .padding(start = 14.dp, end = 10.dp, top = 9.dp, bottom = 7.dp)
+                                    .animateContentSize(),
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                Text(
+                                    message.text, color = if (mine) Color.White else Ink,
+                                    fontSize = 14.sp * appMessageScale,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    timeLabel,
+                                    color = if (mine) Color.White.copy(alpha = 0.72f) else Muted,
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.padding(bottom = 1.dp)
+                                )
+                                if (mine) {
+                                    Spacer(Modifier.width(5.dp))
+                                    Text(
+                                        when {
+                                            message.pending -> "◷"
+                                            message.read || message.delivered -> "✓✓"
+                                            else -> "✓"
+                                        },
+                                        color = when {
+                                            message.pending -> Color.White.copy(alpha = 0.72f)
+                                            message.read -> Color(0xFF64B5F6)
+                                            else -> Color.White.copy(alpha = 0.78f)
+                                        },
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1166,6 +1210,7 @@ private fun ChatScreen(
                         batch.set(messageRef, mapOf(
                             "senderId" to myUid, "senderName" to myName,
                             "text" to text, "createdAt" to FieldValue.serverTimestamp(),
+                            "clientCreatedAt" to com.google.firebase.Timestamp.now(),
                             "deliveredAt" to null, "readAt" to null
                         ))
                         batch.update(chatRef, "lastMessage", text, "updatedAt", FieldValue.serverTimestamp())
