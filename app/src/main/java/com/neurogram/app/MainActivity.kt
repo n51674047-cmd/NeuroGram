@@ -1037,7 +1037,10 @@ private fun ChatScreen(
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.lastIndex)
+            val stickyDateCount = messages.map { message ->
+                message.createdAt?.toDate()?.let { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(it) } ?: "unknown"
+            }.distinct().size
+            listState.animateScrollToItem((messages.size + stickyDateCount - 1).coerceAtLeast(0))
             val unread = messages.filter { it.senderId != myUid && !it.read }
             if (unread.isNotEmpty()) {
                 val batch = db.batch()
