@@ -30,7 +30,6 @@ NovixGram — Android-мессенджер с тёмным интерфейсо�
 - Android Gradle Plugin
 - GitHub Actions
 
-
 ## Four-digit email verification (registration)
 
 The app does **not** create a Firebase account when the user first taps “Get code”. The Google Apps Script backend sends a four-digit code, checks its expiry (10 minutes) and limits wrong attempts to five. Only after a correct code does the backend call Firebase Authentication to create the account.
@@ -48,6 +47,32 @@ The app does **not** create a Firebase account when the user first taps “Get c
    - Execute as: **Me**
    - Who has access: **Anyone**
 7. Authorize **sending email** and **external requests** when Google asks. The script uses `MailApp`, not `GmailApp`, so it does not need permission to read or manage the mailbox. Google may still show an "app not verified" warning because this is a private Apps Script project; only proceed if you recognize the project and its code.
-8. Copy the deployed Web app URL ending in `/exec`. It must be inserted into `VERIFICATION_API_URL` in `MainActivity.kt`, then a new APK must be built.
+8. Copy the deployed Web app URL ending in `/exec`. The current Android source already contains a deployed `/exec` URL in `VERIFICATION_API_URL`; only change it if you create a different deployment.
+
+### Safe deployment check (no email is sent)
+
+After copying the updated `Code.gs` into Apps Script, open the deployed `/exec` URL in your phone browser. The `doGet()` health check returns JSON similar to:
+
+```json
+{
+  "ok": true,
+  "service": "NeuroGram verification API",
+  "apiVersion": 1,
+  "ready": true
+}
+```
+
+- `ready: true` means both Script Properties exist and `CODE_PEPPER` is at least 32 characters. The response never returns either property value.
+- `ready: false` means to recheck the exact property names `FIREBASE_API_KEY` and `CODE_PEPPER`.
+- Opening this URL only checks the backend; it does not send an email or create a Firebase account.
+
+If you edit an already deployed script, open **Deploy → Manage deployments**, choose the web app deployment, press **Edit**, select **New version**, and deploy. Then open the same `/exec` URL again. The URL usually stays the same when updating that deployment.
+
+### Registration checks
+
+1. First confirm the health-check response contains `"ready": true`.
+2. In the app, open **Registration**, enter an email, password and username, then tap **Get code**.
+3. Check the inbox and spam folder. The code expires after 10 minutes; another code can be requested after the one-minute resend cooldown.
+4. Enter the four-digit code. The Firebase account is created only after the code is accepted.
 
 The script sends mail from the Google account that owns the Apps Script project. Google Apps Script has daily email quotas, so this is suitable for an early test build, not a high-volume production service. The endpoint is public; it enforces a one-minute resend cooldown per email, a ten-minute code lifetime and five verification attempts.
