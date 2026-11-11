@@ -3,12 +3,27 @@
  * Deploy as a Google Apps Script Web App: Execute as Me; access Anyone.
  * Script Properties: FIREBASE_API_KEY and CODE_PEPPER (32+ random chars).
  */
+
+// Safe public health check. It never returns either Script Property value.
+function doGet() {
+  var props = PropertiesService.getScriptProperties();
+  var pepper = String(props.getProperty("CODE_PEPPER") || "");
+  var apiKey = String(props.getProperty("FIREBASE_API_KEY") || "").trim();
+  var ready = pepper.length >= 32 && apiKey.length > 0;
+  return ContentService.createTextOutput(JSON.stringify({
+    ok: true,
+    service: "NeuroGram verification API",
+    apiVersion: 1,
+    ready: ready
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
 function doPost(e) {
   try {
     var data = JSON.parse((e && e.postData && e.postData.contents) || "{}");
     var action = String(data.action || "");
     var email = String(data.email || "").trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return output(false, "Проверь адрес электронной почты.");
+    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return output(false, "Проверь адрес электронной почты.");
     if (action === "sendCode") return sendCode(email);
     if (action === "verifyAndCreate") return verifyAndCreate(email, String(data.code || ""), String(data.password || ""));
     return output(false, "Неизвестная операция.");
@@ -56,7 +71,7 @@ function sendCode(email) {
 }
 
 function verifyAndCreate(email, code, password) {
-  if (!/^\d{4}$/.test(code)) return output(false, "Введи четырёхзначный код.");
+  if (!/^\\d{4}$/.test(code)) return output(false, "Введи четырёхзначный код.");
   if (password.length < 6 || password.length > 128) return output(false, "Пароль должен содержать от 6 до 128 символов.");
   var props = PropertiesService.getScriptProperties();
   var pepper = props.getProperty("CODE_PEPPER");
