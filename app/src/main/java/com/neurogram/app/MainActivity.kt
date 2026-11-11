@@ -88,27 +88,50 @@ private fun Modifier.glassSurface(shape: Shape = RoundedCornerShape(20.dp)): Mod
     ).border(1.dp, Color.White.copy(alpha = if (appDarkTheme) 0.10f else 0.78f), shape)
 
 class MainActivity : ComponentActivity() {
-    private var lastPresenceUid: String? = null
+    private val presenceHandler = Handler(Looper.getMainLooper())
+    private var presenceRunnable: Runnable? = null
     private var authPresenceListener: FirebaseAuth.AuthStateListener? = null
 
-    private fun updatePresence(online: Boolean) {
-        val uid = if (online) FirebaseAuth.getInstance().currentUser?.uid else
-            lastPresenceUid ?: FirebaseAuth.getInstance().currentUser?.uid
-        if (uid.isNullOrBlank()) return
-        if (online) lastPresenceUid = uid
-        val data = mapOf("online" to online, "lastSeen" to FieldValue.serverTimestamp())
+    // Heartbeat instead of a one-time onStart write: an active session stays
+    // visible, while a closed app naturally expires after the freshness window.
+    // We deliberately do not write online=false onStop because another device
+    // may still be using the same account.
+    private fun updatePresence() {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val data = mapOf("online" to true, "lastSeen" to FieldValue.serverTimestamp())
         val db = FirebaseFirestore.getInstance()
         db.runBatch { batch ->
             batch.set(db.collection("publicProfiles").document(uid), data, com.google.firebase.firestore.SetOptions.merge())
             batch.set(db.collection("users").document(uid), data, com.google.firebase.firestore.SetOptions.merge())
         }
-        if (!online) lastPresenceUid = null
     }
 
-    override fun onStart() { super.onStart(); updatePresence(true) }
-    override fun onStop() { updatePresence(false); super.onStop() }
+    private fun startPresenceHeartbeat() {
+        stopPresenceHeartbeat()
+        if (FirebaseAuth.getInstance().currentUser == null) return
+        updatePresence()
+        val task = object : Runnable {
+            override fun run() {
+                if (FirebaseAuth.getInstance().currentUser != null) {
+                    updatePresence()
+                    presenceHandler.postDelayed(this, 30_000L)
+                }
+            }
+        }
+        presenceRunnable = task
+        presenceHandler.postDelayed(task, 30_000L)
+    }
+
+    private fun stopPresenceHeartbeat() {
+        presenceRunnable?.let { presenceHandler.removeCallbacks(it) }
+        presenceRunnable = null
+    }
+
+    override fun onStart() { super.onStart(); startPresenceHeartbeat() }
+    override fun onStop() { stopPresenceHeartbeat(); super.onStop() }
 
     override fun onDestroy() {
+        stopPresenceHeartbeat()
         authPresenceListener?.let { FirebaseAuth.getInstance().removeAuthStateListener(it) }
         super.onDestroy()
     }
@@ -116,7 +139,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         authPresenceListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
-            if (firebaseAuth.currentUser != null) updatePresence(true) else updatePresence(false)
+            if (firebaseAuth.currentUser != null) startPresenceHeartbeat() else stopPresenceHeartbeat()
         }.also { FirebaseAuth.getInstance().addAuthStateListener(it) }
         setContent {
             MaterialTheme(colorScheme = if (appDarkTheme) darkColorScheme(
@@ -1010,8 +1033,17 @@ private fun ChatScreen(
                     }
                     val batch = db.batch()
                     var changed = false
-                    docs.filter { it.getString("senderId") != myUid && it.getTimestamp("deliveredAt") == null }.forEach { doc ->
-                        batch.update(doc.reference, "deliveredAt", FieldValue.serverTimestamp()); changed = true
+                    // Opening/keeping this chat visible means incoming messages are
+                    // both delivered and read. Apply both timestamps from the live
+                    // snapshot so receipts also work for messages arriving later.
+                    docs.filter {
+                        it.getString("senderId") != myUid &&
+                            (it.getTimestamp("deliveredAt") == null || it.getTimestamp("readAt") == null)
+                    }.forEach { doc ->
+                        val updates = mutableMapOf<String, Any>()
+                        if (doc.getTimestamp("deliveredAt") == null) updates["deliveredAt"] = FieldValue.serverTimestamp()
+                        if (doc.getTimestamp("readAt") == null) updates["readAt"] = FieldValue.serverTimestamp()
+                        if (updates.isNotEmpty()) { batch.update(doc.reference, updates); changed = true }
                     }
                     if (changed) batch.commit()
                 }
@@ -1041,12 +1073,6 @@ private fun ChatScreen(
                 message.createdAt?.toDate()?.let { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(it) } ?: "unknown"
             }.distinct().size
             listState.animateScrollToItem((messages.size + stickyDateCount - 1).coerceAtLeast(0))
-            val unread = messages.filter { it.senderId != myUid && !it.read }
-            if (unread.isNotEmpty()) {
-                val batch = db.batch()
-                unread.forEach { message -> batch.update(db.collection("chats").document(chatId).collection("messages").document(message.id), "readAt", FieldValue.serverTimestamp()) }
-                batch.commit()
-            }
         }
     }
 
