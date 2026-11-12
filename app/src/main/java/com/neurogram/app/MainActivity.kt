@@ -312,6 +312,35 @@ private fun NeuroGramSplash(onFinished: () -> Unit) {
     }
 }
 
+
+@Composable
+private fun MaintenanceScreen() {
+    Box(
+        Modifier.fillMaxSize().background(Bg).statusBarsPadding().navigationBarsPadding().padding(26.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(26.dp)).padding(26.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(Modifier.size(66.dp).background(Red.copy(alpha = 0.13f), CircleShape), contentAlignment = Alignment.Center) {
+                Text("N", color = Red, fontSize = 42.sp, fontWeight = FontWeight.Black)
+            }
+            Spacer(Modifier.height(22.dp))
+            Text("NovixGram", color = Ink, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(18.dp))
+            Text("Разработка приостановлена", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Приложение временно не функционирует. Работа над проектом приостановлена. Спасибо всем, кто поддерживал NovixGram.",
+                color = Muted, fontSize = 14.sp, lineHeight = 21.sp
+            )
+            Spacer(Modifier.height(20.dp))
+            Text("Техническая пауза", color = Red, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
 @Composable
 private fun NeuroGramApp() {
     val context = LocalContext.current
@@ -324,6 +353,9 @@ private fun NeuroGramApp() {
         NeuroGramSplash(onFinished = { showSplash = false })
         return
     }
+
+    MaintenanceScreen()
+    return
 
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
