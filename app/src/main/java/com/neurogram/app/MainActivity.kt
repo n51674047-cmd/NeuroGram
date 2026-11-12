@@ -719,6 +719,7 @@ private fun NeuroGramApp() {
                         }
                     )
                 }
+            }
                 AnimatedVisibility(
                     visible = updateInfo != null,
                     modifier = Modifier.align(Alignment.TopCenter)
