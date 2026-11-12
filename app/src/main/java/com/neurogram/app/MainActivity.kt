@@ -38,6 +38,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -251,7 +252,9 @@ private data class ChatItem(
     val lastMessage: String,
     val otherUid: String,
     val isMuted: Boolean = false,
-    val isBlocked: Boolean = false
+    val isBlocked: Boolean = false,
+    val isGroup: Boolean = false,
+    val memberCount: Int = 2
 )
 
 private data class MessageItem(
@@ -262,7 +265,13 @@ private data class MessageItem(
     val delivered: Boolean,
     val read: Boolean,
     val pending: Boolean = false,
-    val createdAt: com.google.firebase.Timestamp? = null
+    val createdAt: com.google.firebase.Timestamp? = null,
+    val replyToId: String = "",
+    val replyToText: String = "",
+    val mediaUrl: String = "",
+    val mediaType: String = "",
+    val edited: Boolean = false,
+    val reactions: Map<String, List<String>> = emptyMap()
 )
 
 @Composable
@@ -470,13 +479,15 @@ private fun NeuroGramApp() {
                             val members = doc.get("members") as? List<*> ?: emptyList<Any>()
                             val otherId = members.firstOrNull { it?.toString() != uid }?.toString()
                             val names = doc.get("memberNames") as? Map<*, *> ?: emptyMap<Any, Any>()
-                            val title = names[otherId]?.toString() ?: "Диалог NovixGram"
+                            val isGroup = doc.getBoolean("isGroup") == true
+                            val title = if (isGroup) doc.getString("title") ?: "Группа NovixGram" else names[otherId]?.toString() ?: "Диалог NovixGram"
                             val hiddenFor = doc.get("hiddenFor") as? List<*> ?: emptyList<Any>()
                             if (hiddenFor.contains(uid)) return@mapNotNull null
                             val mutedFor = doc.get("mutedFor") as? List<*> ?: emptyList<Any>()
                             val blockedBy = doc.get("blockedBy") as? List<*> ?: emptyList<Any>()
                             ChatItem(doc.id, title, doc.getString("lastMessage") ?: "Нет сообщений",
-                                otherId ?: "", mutedFor.contains(uid), blockedBy.contains(uid))
+                                if (isGroup) "" else otherId ?: "", mutedFor.contains(uid), blockedBy.contains(uid),
+                                isGroup, members.size)
                         }?.sortedByDescending { it.id } ?: emptyList()
                     }
                 }
@@ -656,6 +667,60 @@ private fun NeuroGramApp() {
         }
     }
 
+    fun createGroup(groupTitle: String, rawUsernames: String) {
+        val me = currentUser ?: return
+        val cleanTitle = groupTitle.trim().take(40)
+        val requested = rawUsernames.split(Regex("[,\\s;]+"))
+            .map { it.trim().removePrefix("@").lowercase() }
+            .filter { it.isNotBlank() && it != nickname.trim().removePrefix("@").lowercase() }
+            .distinct().take(49)
+        if (cleanTitle.isBlank()) { error = "Введи название группы"; return }
+        if (requested.isEmpty()) { error = "Добавь хотя бы одного участника по username"; return }
+        if (requested.any { !Regex("^[a-z0-9_]{5,20}$").matches(it) }) {
+            error = "Проверь username участников"; return
+        }
+        loading = true
+        val resolved = mutableListOf<Pair<String, String>>()
+        fun resolveNext(index: Int) {
+            if (index >= requested.size) {
+                val members = (listOf(me.uid) + resolved.map { it.first }).distinct()
+                if (members.size < 2) { loading = false; error = "В группе должно быть минимум два человека"; return }
+                val names = mutableMapOf<String, String>()
+                names[me.uid] = nickname.ifBlank { me.email?.substringBefore("@") ?: "Я" }
+                resolved.forEach { names[it.first] = it.second }
+                val chatRef = db.collection("chats").document()
+                val data = mapOf(
+                    "members" to members, "memberNames" to names,
+                    "title" to cleanTitle, "isGroup" to true,
+                    "createdBy" to me.uid, "admins" to listOf(me.uid),
+                    "lastMessage" to "Группа создана",
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+                chatRef.set(data).addOnSuccessListener {
+                    loading = false; error = ""
+                    selectedChatId = chatRef.id; selectedChatTitle = cleanTitle
+                    selectedOtherUid = ""; page = "chat"
+                }.addOnFailureListener {
+                    loading = false; error = "Не удалось создать группу: \${it.localizedMessage}"
+                }
+                return
+            }
+            db.collection("publicProfiles").whereEqualTo("usernameLower", requested[index]).limit(1).get()
+                .addOnSuccessListener { result ->
+                    val profile = result.documents.firstOrNull()
+                    if (profile == null) {
+                        loading = false; error = "Не найден пользователь @\${requested[index]}"; return@addOnSuccessListener
+                    }
+                    resolved.add(profile.id to (profile.getString("displayName") ?: profile.getString("username") ?: requested[index]))
+                    resolveNext(index + 1)
+                }.addOnFailureListener {
+                    loading = false; error = "Ошибка поиска участников: \${it.localizedMessage}"
+                }
+        }
+        resolveNext(0)
+    }
+
     fun startChat(targetUsername: String) {
         val me = currentUser ?: return
         val cleanTarget = targetUsername.trim().removePrefix("@").lowercase()
@@ -792,6 +857,7 @@ private fun NeuroGramApp() {
                         updateInfo = updateInfo, updateDownloading = updateDownloading,
                         onUpdate = { installOrDownloadUpdate() },
                         onAddChat = { startChat(it) },
+                        onCreateGroup = { title, usernames -> createGroup(title, usernames) },
                         onOpenChat = { chat ->
                             selectedChatId = chat.id
                             selectedChatTitle = chat.title
@@ -979,7 +1045,8 @@ private fun AuthField(
 private fun ChatList(
     userLabel: String, chats: List<ChatItem>, error: String, loading: Boolean,
     updateInfo: UpdateInfo?, updateDownloading: Boolean, onUpdate: () -> Unit,
-    onAddChat: (String) -> Unit, onOpenChat: (ChatItem) -> Unit,
+    onAddChat: (String) -> Unit, onCreateGroup: (String, String) -> Unit,
+    onOpenChat: (ChatItem) -> Unit,
     onProfile: () -> Unit, onMenu: () -> Unit
 ) {
     var showAdd by remember { mutableStateOf(false) }
@@ -990,6 +1057,9 @@ private fun ChatList(
     var foundUsername by remember { mutableStateOf("") }
     var foundAvatar by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
+    var showGroupDialog by remember { mutableStateOf(false) }
+    var groupTitle by remember { mutableStateOf("") }
+    var groupUsernames by remember { mutableStateOf("") }
     LaunchedEffect(targetUsername, showAdd) {
         foundUid = ""; foundName = ""; foundUsername = ""; foundAvatar = ""
         val clean = targetUsername.trim().removePrefix("@").lowercase()
@@ -1055,7 +1125,10 @@ private fun ChatList(
             )
             AnimatedVisibility(visible = showAdd, enter = fadeIn(tween(220)) + expandHorizontally(tween(260))) {
                 Column(Modifier.fillMaxWidth().padding(top = 12.dp).glassSurface(RoundedCornerShape(18.dp)).padding(13.dp).animateContentSize()) {
-                    Text("Новое сообщение", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Новое сообщение", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { showGroupDialog = true }) { Text("＋ Группа", color = Red) }
+                    }
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = targetUsername, onValueChange = { targetUsername = it.removePrefix("@") },
@@ -1131,12 +1204,12 @@ private fun ChatList(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(Modifier.size(52.dp).background(Red.copy(alpha = 0.12f), CircleShape), contentAlignment = Alignment.Center) {
-                                Text(chat.title.take(1).uppercase(), color = Red, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                                Text(if (chat.isGroup) "👥" else chat.title.take(1).uppercase(), color = Red, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                             }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(chat.title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                Text(chat.lastMessage.ifBlank { "Начните переписку" }, color = Muted, fontSize = 12.sp,
+                                Text((if (chat.isGroup) "${chat.memberCount} участников · " else "") + chat.lastMessage.ifBlank { "Начните переписку" }, color = Muted, fontSize = 12.sp,
                                     modifier = Modifier.padding(top = 4.dp), maxLines = 1)
                             }
                             Column(horizontalAlignment = Alignment.End) {
@@ -1149,6 +1222,29 @@ private fun ChatList(
                 }
             }
         }
+        if (showGroupDialog) AlertDialog(
+            onDismissRequest = { showGroupDialog = false },
+            title = { Text("Новая группа", color = Ink) },
+            text = {
+                Column {
+                    OutlinedTextField(value = groupTitle, onValueChange = { groupTitle = it.take(40) },
+                        label = { Text("Название группы") }, singleLine = true)
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(value = groupUsernames, onValueChange = { groupUsernames = it },
+                        label = { Text("Username участников") }, placeholder = { Text("@user1, @user2") },
+                        minLines = 2, maxLines = 4)
+                    Text("Перечисли username через запятую или пробел.", color = Muted, fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 7.dp))
+                }
+            },
+            confirmButton = { TextButton(onClick = {
+                showGroupDialog = false
+                onCreateGroup(groupTitle, groupUsernames)
+                groupTitle = ""; groupUsernames = ""
+            }) { Text("Создать", color = Red) } },
+            dismissButton = { TextButton(onClick = { showGroupDialog = false }) { Text("Отмена", color = Muted) } },
+            containerColor = Panel
+        )
         FloatingActionButton(
             onClick = { showAdd = !showAdd; if (!showAdd) targetUsername = "" },
             modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(22.dp),
