@@ -1504,7 +1504,7 @@ private fun ChatScreen(
                         text = { Text("Удалить чат", color = Color(0xFFE05260)) },
                         onClick = { menuExpanded = false; showDeleteConfirm = true }
                     )
-                    DropdownMenuItem(
+                    if (!isGroupChat) DropdownMenuItem(
                         text = { Text(if (isBlockedByMe) "Разблокировать" else "Заблокировать", color = if (isBlockedByMe) Ink else Color(0xFFE05260)) },
                         onClick = { menuExpanded = false; if (isBlockedByMe) db.collection("chats").document(chatId).update("blockedBy", FieldValue.arrayRemove(myUid)) else showBlockConfirm = true }
                     )
