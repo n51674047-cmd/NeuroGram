@@ -1315,6 +1315,33 @@ private fun ChatScreen(
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val context = LocalContext.current
     var uploadingMedia by remember(chatId) { mutableStateOf(false) }
+    fun sendMessageContent(text: String, mediaUrl: String = "", mediaType: String = "") {
+        val chatRef = db.collection("chats").document(chatId)
+        val messageRef = chatRef.collection("messages").document()
+        val reply = replyingTo
+        val preview = when {
+            mediaType == "image" -> "📷 Фото"
+            mediaType == "video" -> "▶ Видео"
+            else -> text
+        }
+        val batch = db.batch()
+        batch.set(messageRef, mapOf(
+            "senderId" to myUid, "senderName" to myName,
+            "text" to text, "mediaUrl" to mediaUrl, "mediaType" to mediaType,
+            "replyToId" to (reply?.id ?: ""), "replyToText" to (reply?.text?.takeIf { it.isNotBlank() } ?: reply?.let { if (it.mediaType == "image") "Фото" else if (it.mediaType == "video") "Видео" else "" } ?: ""),
+            "createdAt" to FieldValue.serverTimestamp(),
+            "clientCreatedAt" to com.google.firebase.Timestamp.now(),
+            "deliveredAt" to null, "readAt" to null,
+            "edited" to false
+        ))
+        batch.update(chatRef, "lastMessage", preview, "updatedAt", FieldValue.serverTimestamp())
+        batch.commit().addOnFailureListener {
+            error = "Не удалось отправить сообщение: ${it.localizedMessage}"
+        }.addOnSuccessListener {
+            replyingTo = null
+        }
+    }
+
     val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             uploadingMedia = true
@@ -1348,32 +1375,6 @@ private fun ChatScreen(
         }
     }
 
-    fun sendMessageContent(text: String, mediaUrl: String = "", mediaType: String = "") {
-        val chatRef = db.collection("chats").document(chatId)
-        val messageRef = chatRef.collection("messages").document()
-        val reply = replyingTo
-        val preview = when {
-            mediaType == "image" -> "📷 Фото"
-            mediaType == "video" -> "▶ Видео"
-            else -> text
-        }
-        val batch = db.batch()
-        batch.set(messageRef, mapOf(
-            "senderId" to myUid, "senderName" to myName,
-            "text" to text, "mediaUrl" to mediaUrl, "mediaType" to mediaType,
-            "replyToId" to (reply?.id ?: ""), "replyToText" to (reply?.text?.takeIf { it.isNotBlank() } ?: reply?.let { if (it.mediaType == "image") "Фото" else if (it.mediaType == "video") "Видео" else "" } ?: ""),
-            "createdAt" to FieldValue.serverTimestamp(),
-            "clientCreatedAt" to com.google.firebase.Timestamp.now(),
-            "deliveredAt" to null, "readAt" to null,
-            "edited" to false
-        ))
-        batch.update(chatRef, "lastMessage", preview, "updatedAt", FieldValue.serverTimestamp())
-        batch.commit().addOnFailureListener {
-            error = "Не удалось отправить сообщение: ${it.localizedMessage}"
-        }.addOnSuccessListener {
-            replyingTo = null
-        }
-    }
 
     DisposableEffect(otherUid) {
         if (otherUid.isBlank()) {
