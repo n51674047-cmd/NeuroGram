@@ -13,7 +13,8 @@ exports.sendNewMessagePush = onDocumentCreated(
     const message = event.data?.data();
     if (!message || typeof message.senderId !== "string") return;
     const text = typeof message.text === "string" ? message.text : "";
-    if (!text) return;
+    const mediaType = typeof message.mediaType === "string" ? message.mediaType : "";
+    if (!text && !mediaType) return;
 
     const db = getFirestore();
     const chatRef = db.collection("chats").doc(event.params.chatId);
@@ -21,46 +22,49 @@ exports.sendNewMessagePush = onDocumentCreated(
     if (!chatSnap.exists) return;
     const chat = chatSnap.data() || {};
     const members = Array.isArray(chat.members) ? chat.members : [];
-    const recipientUid = members.find((uid) => uid !== message.senderId);
-    if (!recipientUid) return;
-
+    const recipients = members.filter((uid) => uid && uid !== message.senderId);
     const mutedFor = Array.isArray(chat.mutedFor) ? chat.mutedFor : [];
-    if (mutedFor.includes(recipientUid)) return;
-
-    const tokenSnap = await db.collection("users").doc(recipientUid)
-      .collection("fcmTokens").get();
-    const tokenDocs = tokenSnap.docs.filter((doc) => typeof doc.data().token === "string");
-    if (tokenDocs.length === 0) return;
-
-    const memberNames = chat.memberNames || {};
     const senderName = typeof message.senderName === "string" && message.senderName
-      ? message.senderName
-      : (memberNames[message.senderId] || "Новое сообщение");
-    const payload = {
-      data: {
-        chatId: String(event.params.chatId),
-        messageId: String(event.params.messageId),
-        senderName: String(senderName).slice(0, 80),
-        text: text.slice(0, 140)
-      },
-      android: { priority: "high" }
-    };
+      ? message.senderName : "Новое сообщение";
+    const preview = mediaType === "image" ? "📷 Фото"
+      : mediaType === "video" ? "▶ Видео" : text.slice(0, 140);
 
-    for (let i = 0; i < tokenDocs.length; i += 500) {
-      const chunk = tokenDocs.slice(i, i + 500);
-      const tokens = chunk.map((doc) => doc.data().token);
-      const response = await getMessaging().sendEachForMulticast({ ...payload, tokens });
-      const removals = [];
-      response.responses.forEach((result, index) => {
-        if (!result.success) {
-          const code = result.error?.code || "";
-          if (code.includes("registration-token-not-registered") ||
-              code.includes("invalid-registration-token")) {
-            removals.push(chunk[index].ref.delete());
+    for (const recipientUid of recipients) {
+      if (mutedFor.includes(recipientUid)) continue;
+      const tokenSnap = await db.collection("users").doc(recipientUid)
+        .collection("fcmTokens").get();
+      const tokenDocs = tokenSnap.docs.filter((doc) => typeof doc.data().token === "string");
+      if (tokenDocs.length === 0) continue;
+
+      const title = chat.isGroup === true
+        ? (typeof chat.title === "string" ? chat.title : "Групповой чат") + " · " + senderName
+        : senderName;
+      const payload = {
+        data: {
+          chatId: String(event.params.chatId),
+          messageId: String(event.params.messageId),
+          senderName: String(title).slice(0, 80),
+          text: preview
+        },
+        android: { priority: "high" }
+      };
+
+      for (let i = 0; i < tokenDocs.length; i += 500) {
+        const chunk = tokenDocs.slice(i, i + 500);
+        const tokens = chunk.map((doc) => doc.data().token);
+        const response = await getMessaging().sendEachForMulticast({ ...payload, tokens });
+        const removals = [];
+        response.responses.forEach((result, index) => {
+          if (!result.success) {
+            const code = result.error?.code || "";
+            if (code.includes("registration-token-not-registered") ||
+                code.includes("invalid-registration-token")) {
+              removals.push(chunk[index].ref.delete());
+            }
           }
-        }
-      });
-      if (removals.length) await Promise.all(removals);
+        });
+        if (removals.length) await Promise.all(removals);
+      }
     }
 
     await chatRef.set({ lastPushAt: FieldValue.serverTimestamp() }, { merge: true });
