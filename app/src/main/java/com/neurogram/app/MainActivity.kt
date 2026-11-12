@@ -1859,6 +1859,7 @@ private fun PublicProfileScreen(uid: String, db: FirebaseFirestore, onBack: () -
     var displayName by remember(uid) { mutableStateOf("") }
     var editDisplayName by remember(uid) { mutableStateOf("") }
     var bio by remember(uid) { mutableStateOf("") }
+    var statusText by remember(uid) { mutableStateOf("") }
     var avatarUrl by remember(uid) { mutableStateOf("") }
     var loading by remember(uid) { mutableStateOf(true) }
     var error by remember(uid) { mutableStateOf("") }
@@ -1876,6 +1877,7 @@ private fun PublicProfileScreen(uid: String, db: FirebaseFirestore, onBack: () -
                     } else if (doc != null && doc.exists()) {
                         username = doc.getString("username") ?: doc.getString("nickname") ?: "Пользователь"
                         bio = doc.getString("bio") ?: ""
+                        statusText = doc.getString("status") ?: ""
                         avatarUrl = doc.getString("avatarUrl") ?: ""
                     } else error = "Профиль не найден"
                     loading = false
@@ -1904,6 +1906,7 @@ private fun PublicProfileScreen(uid: String, db: FirebaseFirestore, onBack: () -
         Spacer(Modifier.height(12.dp))
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Red)
         if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 13.sp)
+        if (statusText.isNotBlank()) Text(statusText, color = Red, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp))
         Column(Modifier.fillMaxWidth().padding(top = 18.dp).background(Panel, RoundedCornerShape(18.dp)).padding(18.dp)) {
             Text("О себе", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             Text(bio.ifBlank { "Пользователь пока не добавил описание." }, color = Ink, fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp))
@@ -1920,6 +1923,8 @@ private fun ProfileScreen(
     var displayName by remember(uid) { mutableStateOf("") }
     var editDisplayName by remember(uid) { mutableStateOf("") }
     var bio by remember(uid) { mutableStateOf("") }
+    var statusText by remember(uid) { mutableStateOf("") }
+    var editStatus by remember(uid) { mutableStateOf("") }
     var avatarUrl by remember(uid) { mutableStateOf("") }
     var editUsername by remember(uid) { mutableStateOf("") }
     var editBio by remember(uid) { mutableStateOf("") }
@@ -1932,8 +1937,10 @@ private fun ProfileScreen(
             username = doc.getString("username") ?: doc.getString("nickname") ?: ""
             displayName = doc.getString("displayName") ?: username
             bio = doc.getString("bio") ?: ""
+            statusText = doc.getString("status") ?: ""
             avatarUrl = doc.getString("avatarUrl") ?: ""
             editUsername = username
+            editStatus = statusText
             editDisplayName = displayName
             editBio = bio
         }.addOnFailureListener { message = "Не удалось загрузить профиль: ${it.localizedMessage}" }
@@ -1964,10 +1971,12 @@ private fun ProfileScreen(
     fun saveProfileChanges() {
         val nextUsername = editUsername.trim().removePrefix("@").lowercase()
         val nextBio = editBio.trim()
+        val nextStatus = editStatus.trim()
         val nextDisplayName = editDisplayName.trim()
         if (nextDisplayName.isBlank() || nextDisplayName.length > 40) { message = "Имя: от 1 до 40 символов"; return }
         if (!Regex("^[a-z0-9_]{5,20}$").matches(nextUsername)) { message = "Username: 5–20 символов, латиница, цифры и _"; return }
         if (nextBio.length > 160) { message = "Описание не должно быть длиннее 160 символов"; return }
+        if (nextStatus.length > 60) { message = "Статус не должен быть длиннее 60 символов"; return }
         loading = true
         val oldUsername = username
         val newRef = db.collection("usernames").document(nextUsername)
@@ -1980,12 +1989,12 @@ private fun ProfileScreen(
             transaction.set(newRef, mapOf("uid" to uid))
             if (oldRef != null && oldDoc?.exists() == true && oldDoc.getString("uid") == uid) transaction.delete(oldRef)
             val common = mapOf("uid" to uid, "username" to nextUsername, "usernameLower" to nextUsername,
-                "nickname" to nextUsername, "displayName" to nextDisplayName, "bio" to nextBio, "avatarUrl" to avatarUrl)
+                "nickname" to nextUsername, "displayName" to nextDisplayName, "bio" to nextBio, "status" to nextStatus, "avatarUrl" to avatarUrl)
             transaction.set(db.collection("users").document(uid), common, com.google.firebase.firestore.SetOptions.merge())
             transaction.set(db.collection("publicProfiles").document(uid), common, com.google.firebase.firestore.SetOptions.merge())
             null
         }.addOnSuccessListener {
-            username = nextUsername; displayName = nextDisplayName; bio = nextBio; editUsername = nextUsername; editDisplayName = nextDisplayName; editBio = nextBio
+            username = nextUsername; displayName = nextDisplayName; bio = nextBio; statusText = nextStatus; editUsername = nextUsername; editDisplayName = nextDisplayName; editBio = nextBio; editStatus = nextStatus
             onUsernameChanged(nextUsername); loading = false; showEdit = false; message = "Профиль сохранён"
         }.addOnFailureListener { loading = false; message = it.localizedMessage ?: "Не удалось сохранить профиль" }
     }
@@ -2009,9 +2018,10 @@ private fun ProfileScreen(
         Text(displayName.ifBlank { username }, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
         Text("@${username.ifBlank { "username" }}", color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
         Text(email, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
+        if (statusText.isNotBlank()) Text(statusText, color = Red, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
         Text(bio.ifBlank { "Добавь описание профиля" }, color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 14.dp))
         Spacer(Modifier.height(24.dp))
-        OutlinedButton(onClick = { editUsername = username; editDisplayName = displayName; editBio = bio; showEdit = true }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("Изменить профиль", color = Red) }
+        OutlinedButton(onClick = { editUsername = username; editDisplayName = displayName; editBio = bio; editStatus = statusText; showEdit = true }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("Изменить профиль", color = Red) }
         OutlinedButton(onClick = onSettings, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("⚙  Настройки", color = Red) }
         if (message.isNotBlank()) Text(message, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Red)
@@ -2027,6 +2037,8 @@ private fun ProfileScreen(
                 OutlinedTextField(value = editDisplayName, onValueChange = { editDisplayName = it.take(40) }, label = { Text("Имя") }, singleLine = true)
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(value = editUsername, onValueChange = { editUsername = it }, label = { Text("Username") }, prefix = { Text("@") }, singleLine = true)
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(value = editStatus, onValueChange = { editStatus = it.take(60) }, label = { Text("Статус") }, singleLine = true)
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(value = editBio, onValueChange = { editBio = it.take(160) }, label = { Text("Описание") }, minLines = 3, maxLines = 4)
                 Text("${editBio.length}/160", color = Muted, fontSize = 11.sp, modifier = Modifier.align(Alignment.End))
