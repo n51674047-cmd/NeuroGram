@@ -982,6 +982,7 @@ private fun ChatList(
     onProfile: () -> Unit, onMenu: () -> Unit
 ) {
     var showAdd by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     var targetUsername by remember { mutableStateOf("") }
     var foundUid by remember { mutableStateOf("") }
     var foundName by remember { mutableStateOf("") }
@@ -1030,11 +1031,27 @@ private fun ChatList(
                 Text(userLabel, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             }
             Spacer(Modifier.height(18.dp))
-            Row(Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(15.dp)).padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("⌕", color = Muted, fontSize = 22.sp)
-                Spacer(Modifier.width(10.dp))
-                Text("Поиск по чатам", color = Muted, fontSize = 14.sp)
-            }
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = { Text("Поиск по чатам и сообщениям", color = Muted, fontSize = 14.sp) },
+                leadingIcon = { Text("⌕", color = Red, fontSize = 23.sp) },
+                trailingIcon = {
+                    if (searchQuery.isNotBlank()) {
+                        Text("×", color = Muted, fontSize = 22.sp,
+                            modifier = Modifier.clickable { searchQuery = "" }.padding(horizontal = 8.dp))
+                    }
+                },
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Red, unfocusedBorderColor = Divider,
+                    focusedTextColor = Ink, unfocusedTextColor = Ink,
+                    focusedContainerColor = Panel, unfocusedContainerColor = Panel,
+                    cursorColor = Red
+                )
+            )
             AnimatedVisibility(visible = showAdd, enter = fadeIn(tween(220)) + expandHorizontally(tween(260))) {
                 Column(Modifier.fillMaxWidth().padding(top = 12.dp).glassSurface(RoundedCornerShape(18.dp)).padding(13.dp).animateContentSize()) {
                     Text("Новое сообщение", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -1082,18 +1099,29 @@ private fun ChatList(
             if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Red)
             Spacer(Modifier.height(17.dp))
-            if (chats.isEmpty()) {
+            val filteredChats = chats.filter { chat ->
+                searchQuery.isBlank() ||
+                    chat.title.contains(searchQuery.trim(), ignoreCase = true) ||
+                    chat.lastMessage.contains(searchQuery.trim(), ignoreCase = true)
+            }
+            if (filteredChats.isEmpty()) {
                 Column(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.size(58.dp).background(Panel, CircleShape), contentAlignment = Alignment.Center) {
                         Text("✉", color = Red, fontSize = 27.sp)
                     }
                     Spacer(Modifier.height(12.dp))
-                    Text("Пока нет сообщений", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Найди человека по username и начни диалог.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                    Text(
+                        if (searchQuery.isNotBlank()) "Ничего не найдено" else "Пока нет сообщений",
+                        color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        if (searchQuery.isNotBlank()) "Попробуй изменить запрос." else "Найди человека по username и начни диалог.",
+                        color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp)
+                    )
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(0.dp), contentPadding = PaddingValues(bottom = 90.dp)) {
-                    items(chats, key = { it.id }) { chat ->
+                    items(filteredChats, key = { it.id }) { chat ->
                         Row(
                             Modifier.fillMaxWidth().clickable { onOpenChat(chat) }.padding(horizontal = 3.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -1690,7 +1718,7 @@ private fun SettingsScreen(section: String, onBack: () -> Unit) {
             }
             else -> Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
                 Text("NovixGram", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text("Версия 1.0", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                Text("Версия ${BuildConfig.VERSION_NAME}", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
                 Text("Мессенджер находится в разработке.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
             }
         }
