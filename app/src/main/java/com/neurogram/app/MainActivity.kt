@@ -1272,7 +1272,10 @@ private fun ChatScreen(
     var otherTyping by remember(otherUid) { mutableStateOf(false) }
     var isGroupChat by remember(chatId) { mutableStateOf(otherUid.isBlank()) }
     var groupMemberCount by remember(chatId) { mutableIntStateOf(2) }
-    var groupMembers by remember(chatId) { mutableStateOf<List<String>>(emptyList()) }
+    var groupMembers by remember(chatId) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var groupAdmins by remember(chatId) { mutableStateOf<List<String>>(emptyList()) }
+    var showAddMemberDialog by remember { mutableStateOf(false) }
+    var newMemberUsername by remember { mutableStateOf("") }
     var pinnedMessageText by remember(chatId) { mutableStateOf("") }
     var pinnedMessageId by remember(chatId) { mutableStateOf("") }
     var showMembersDialog by remember { mutableStateOf(false) }
@@ -1283,6 +1286,7 @@ private fun ChatScreen(
     var replyingTo by remember(chatId) { mutableStateOf<MessageItem?>(null) }
     var editingMessageId by remember(chatId) { mutableStateOf("") }
     var showForwardDialog by remember { mutableStateOf(false) }
+    var forwardingMessage by remember { mutableStateOf<MessageItem?>(null) }
     var isMuted by remember(chatId) { mutableStateOf(false) }
     var blockedBy by remember(chatId) { mutableStateOf<List<String>>(emptyList()) }
     val isBlockedByMe = blockedBy.contains(myUid)
@@ -1376,7 +1380,8 @@ private fun ChatScreen(
                 isGroupChat = doc.getBoolean("isGroup") == true
                 groupMemberCount = (doc.get("members") as? List<*>)?.size ?: 2
                 val names = doc.get("memberNames") as? Map<*, *> ?: emptyMap<Any, Any>()
-                groupMembers = names.values.mapNotNull { it?.toString() }.distinct()
+                groupMembers = names.mapNotNull { (key, value) -> key?.toString()?.let { it to (value?.toString() ?: it) } }.toMap()
+                groupAdmins = (doc.get("admins") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
                 pinnedMessageText = doc.getString("pinnedMessageText") ?: ""
                 pinnedMessageId = doc.getString("pinnedMessageId") ?: ""
                 val mutedFor = doc.get("mutedFor") as? List<*> ?: emptyList<Any>()
@@ -1485,6 +1490,15 @@ private fun ChatScreen(
                     if (isGroupChat) DropdownMenuItem(
                         text = { Text("Участники группы") },
                         onClick = { menuExpanded = false; showMembersDialog = true }
+                    )
+                    if (isGroupChat) DropdownMenuItem(
+                        text = { Text("Покинуть группу", color = Color(0xFFE05260)) },
+                        onClick = {
+                            menuExpanded = false
+                            db.collection("chats").document(chatId).update("members", FieldValue.arrayRemove(myUid), "hiddenFor", FieldValue.arrayUnion(myUid))
+                                .addOnSuccessListener { onBack() }
+                                .addOnFailureListener { error = "Не удалось покинуть группу: ${it.localizedMessage}" }
+                        }
                     )
                     DropdownMenuItem(
                         text = { Text("Удалить чат", color = Color(0xFFE05260)) },
@@ -1694,6 +1708,132 @@ private fun ChatScreen(
             }) { Text("Удалить", color = Color(0xFFE05260)) }
         },
         dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Отмена", color = Muted) } },
+        containerColor = Panel
+    )
+
+    selectedMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { selectedMessage = null },
+            title = { Text("Действия с сообщением", color = Ink) },
+            text = {
+                Column {
+                    TextButton(onClick = { replyingTo = message; selectedMessage = null }) { Text("↩ Ответить", color = Red) }
+                    TextButton(onClick = {
+                        db.collection("chats").document(chatId).collection("messages").document(message.id)
+                            .update("reactions.👍", FieldValue.arrayUnion(myUid))
+                        selectedMessage = null
+                    }) { Text("👍 Поставить реакцию", color = Red) }
+                    TextButton(onClick = {
+                        db.collection("chats").document(chatId).update(
+                            mapOf("pinnedMessageId" to message.id,
+                                "pinnedMessageText" to (message.text.ifBlank { if (message.mediaType == "image") "Фото" else "Видео" }))
+                        )
+                        selectedMessage = null
+                    }) { Text("📌 Закрепить", color = Red) }
+                    TextButton(onClick = {
+                        forwardingMessage = message
+                        showForwardDialog = true
+                        selectedMessage = null
+                    }) { Text("↗ Переслать", color = Red) }
+                    if (message.senderId == myUid) {
+                        TextButton(onClick = {
+                            draft = message.text
+                            editingMessageId = message.id
+                            selectedMessage = null
+                        }) { Text("✎ Изменить", color = Red) }
+                        TextButton(onClick = {
+                            db.collection("chats").document(chatId).collection("messages").document(message.id).delete()
+                                .addOnFailureListener { error = "Не удалось удалить сообщение: ${it.localizedMessage}" }
+                            selectedMessage = null
+                        }) { Text("Удалить сообщение", color = Color(0xFFE05260)) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { selectedMessage = null }) { Text("Закрыть", color = Muted) } },
+            containerColor = Panel
+        )
+    }
+
+    if (showForwardDialog && forwardingMessage != null) AlertDialog(
+        onDismissRequest = { showForwardDialog = false; forwardingMessage = null },
+        title = { Text("Переслать в чат", color = Ink) },
+        text = {
+            Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                val targets = allChats.filter { it.id != chatId }
+                if (targets.isEmpty()) Text("Нет других чатов для пересылки.", color = Muted)
+                targets.forEach { target ->
+                    TextButton(onClick = {
+                        val source = forwardingMessage!!
+                        val ref = db.collection("chats").document(target.id)
+                        val messageRef = ref.collection("messages").document()
+                        val preview = source.text.ifBlank { if (source.mediaType == "image") "📷 Фото" else "▶ Видео" }
+                        messageRef.set(mapOf(
+                            "senderId" to myUid, "senderName" to myName, "text" to source.text,
+                            "mediaUrl" to source.mediaUrl, "mediaType" to source.mediaType,
+                            "forwardedFrom" to source.senderName,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "clientCreatedAt" to com.google.firebase.Timestamp.now(),
+                            "deliveredAt" to null, "readAt" to null
+                        )).addOnSuccessListener {
+                            ref.update("lastMessage", "↗ $preview", "updatedAt", FieldValue.serverTimestamp())
+                        }.addOnFailureListener { error = "Не удалось переслать: ${it.localizedMessage}" }
+                        showForwardDialog = false; forwardingMessage = null
+                    }) { Text(target.title, color = Ink) }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showForwardDialog = false; forwardingMessage = null }) { Text("Отмена", color = Muted) } },
+        containerColor = Panel
+    )
+
+    if (showMembersDialog && isGroupChat) AlertDialog(
+        onDismissRequest = { showMembersDialog = false },
+        title = { Text("Участники группы · ${groupMembers.size}", color = Ink) },
+        text = {
+            Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                groupMembers.forEach { (memberUid, memberName) ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(memberName, color = Ink, modifier = Modifier.weight(1f))
+                        if (myUid in groupAdmins && memberUid != myUid) TextButton(onClick = {
+                            db.collection("chats").document(chatId).update(
+                                "members", FieldValue.arrayRemove(memberUid),
+                                "memberNames.$memberUid", FieldValue.delete()
+                            ).addOnFailureListener { error = "Не удалось удалить участника: ${it.localizedMessage}" }
+                        }) { Text("Удалить", color = Color(0xFFE05260)) }
+                    }
+                }
+                if (myUid in groupAdmins) TextButton(onClick = { showMembersDialog = false; showAddMemberDialog = true }) {
+                    Text("＋ Добавить участника", color = Red)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showMembersDialog = false }) { Text("Готово", color = Red) } },
+        containerColor = Panel
+    )
+
+    if (showAddMemberDialog) AlertDialog(
+        onDismissRequest = { showAddMemberDialog = false },
+        title = { Text("Добавить участника", color = Ink) },
+        text = { OutlinedTextField(value = newMemberUsername, onValueChange = { newMemberUsername = it.removePrefix("@") },
+            label = { Text("Username") }, prefix = { Text("@") }, singleLine = true) },
+        confirmButton = { TextButton(onClick = {
+            val clean = newMemberUsername.trim().lowercase()
+            if (!Regex("^[a-z0-9_]{5,20}$").matches(clean)) { error = "Проверь username" }
+            else db.collection("publicProfiles").whereEqualTo("usernameLower", clean).limit(1).get()
+                .addOnSuccessListener { result ->
+                    val profile = result.documents.firstOrNull()
+                    if (profile == null) error = "Пользователь не найден"
+                    else {
+                        val uid = profile.id
+                        val name = profile.getString("displayName") ?: profile.getString("username") ?: clean
+                        db.collection("chats").document(chatId).update(
+                            "members", FieldValue.arrayUnion(uid), "memberNames.$uid", name
+                        ).addOnSuccessListener { newMemberUsername = ""; showAddMemberDialog = false }
+                            .addOnFailureListener { error = "Не удалось добавить участника: ${it.localizedMessage}" }
+                    }
+                }.addOnFailureListener { error = "Ошибка поиска: ${it.localizedMessage}" }
+        }) { Text("Добавить", color = Red) } },
+        dismissButton = { TextButton(onClick = { showAddMemberDialog = false }) { Text("Отмена", color = Muted) } },
         containerColor = Panel
     )
 
