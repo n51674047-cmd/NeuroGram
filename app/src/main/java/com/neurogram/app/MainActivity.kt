@@ -873,8 +873,9 @@ private fun NeuroGramApp() {
                         chatId = selectedChatId, title = selectedChatTitle,
                         myUid = currentUser?.uid ?: "", otherUid = selectedOtherUid,
                         myName = nickname.ifBlank { currentUser?.email?.substringBefore("@") ?: "Я" },
-                        db = db, onBack = { page = "chats" },
-                        onViewProfile = { previousPage = "chat"; page = "user_profile" }
+                        db = db, storage = storage, allChats = chats,
+                        onBack = { page = "chats" },
+                        onViewProfile = { if (selectedOtherUid.isNotBlank()) { previousPage = "chat"; page = "user_profile" } }
                     )
                     "user_profile" -> PublicProfileScreen(
                         uid = selectedOtherUid, db = db,
@@ -1257,7 +1258,8 @@ private fun ChatList(
 @Composable
 private fun ChatScreen(
     chatId: String, title: String, myUid: String, otherUid: String, myName: String,
-    db: FirebaseFirestore, onBack: () -> Unit, onViewProfile: () -> Unit
+    db: FirebaseFirestore, storage: FirebaseStorage, allChats: List<ChatItem>,
+    onBack: () -> Unit, onViewProfile: () -> Unit
 ) {
     var messages by remember(chatId) { mutableStateOf<List<MessageItem>>(emptyList()) }
     var draft by remember(chatId) { mutableStateOf("") }
@@ -1268,9 +1270,19 @@ private fun ChatScreen(
     var presenceOnline by remember(otherUid) { mutableStateOf(false) }
     var presenceLastSeen by remember(otherUid) { mutableStateOf<com.google.firebase.Timestamp?>(null) }
     var otherTyping by remember(otherUid) { mutableStateOf(false) }
+    var isGroupChat by remember(chatId) { mutableStateOf(otherUid.isBlank()) }
+    var groupMemberCount by remember(chatId) { mutableIntStateOf(2) }
+    var groupMembers by remember(chatId) { mutableStateOf<List<String>>(emptyList()) }
+    var pinnedMessageText by remember(chatId) { mutableStateOf("") }
+    var pinnedMessageId by remember(chatId) { mutableStateOf("") }
+    var showMembersDialog by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showBlockConfirm by remember { mutableStateOf(false) }
+    var selectedMessage by remember { mutableStateOf<MessageItem?>(null) }
+    var replyingTo by remember(chatId) { mutableStateOf<MessageItem?>(null) }
+    var editingMessageId by remember(chatId) { mutableStateOf("") }
+    var showForwardDialog by remember { mutableStateOf(false) }
     var isMuted by remember(chatId) { mutableStateOf(false) }
     var blockedBy by remember(chatId) { mutableStateOf<List<String>>(emptyList()) }
     val isBlockedByMe = blockedBy.contains(myUid)
@@ -1278,6 +1290,9 @@ private fun ChatScreen(
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     DisposableEffect(otherUid) {
+        if (otherUid.isBlank()) {
+            onDispose { }
+        } else {
         val otherListener = db.collection("publicProfiles").document(otherUid)
             .addSnapshotListener { doc, exception ->
                 if (exception == null && doc != null && doc.exists()) {
@@ -1290,12 +1305,19 @@ private fun ChatScreen(
                 }
             }
         onDispose { otherListener.remove() }
+        }
     }
 
     DisposableEffect(chatId) {
         val chatRef = db.collection("chats").document(chatId)
         val chatListener = chatRef.addSnapshotListener { doc, exception ->
             if (exception == null && doc != null && doc.exists()) {
+                isGroupChat = doc.getBoolean("isGroup") == true
+                groupMemberCount = (doc.get("members") as? List<*>)?.size ?: 2
+                val names = doc.get("memberNames") as? Map<*, *> ?: emptyMap<Any, Any>()
+                groupMembers = names.values.mapNotNull { it?.toString() }.distinct()
+                pinnedMessageText = doc.getString("pinnedMessageText") ?: ""
+                pinnedMessageId = doc.getString("pinnedMessageId") ?: ""
                 val mutedFor = doc.get("mutedFor") as? List<*> ?: emptyList<Any>()
                 isMuted = mutedFor.contains(myUid)
                 blockedBy = (doc.get("blockedBy") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
@@ -1310,7 +1332,12 @@ private fun ChatScreen(
                 else {
                     val docs = snapshot?.documents ?: emptyList()
                     messages = docs.map { doc ->
-                        MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "", doc.getTimestamp("deliveredAt") != null, doc.getTimestamp("readAt") != null, doc.metadata.hasPendingWrites(), doc.getTimestamp("createdAt") ?: doc.getTimestamp("clientCreatedAt"))
+                        val reactionsRaw = doc.get("reactions") as? Map<*, *> ?: emptyMap<Any, Any>()
+                        val reactions = reactionsRaw.mapNotNull { (key, value) ->
+                            val users = (value as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                            key?.toString()?.let { it to users }
+                        }.toMap()
+                        MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "", doc.getTimestamp("deliveredAt") != null, doc.getTimestamp("readAt") != null, doc.metadata.hasPendingWrites(), doc.getTimestamp("createdAt") ?: doc.getTimestamp("clientCreatedAt"), doc.getString("replyToId") ?: "", doc.getString("replyToText") ?: "", doc.getString("mediaUrl") ?: "", doc.getString("mediaType") ?: "", doc.getBoolean("edited") == true, reactions)
                     }
                     val batch = db.batch()
                     var changed = false
@@ -1361,12 +1388,12 @@ private fun ChatScreen(
         Row(Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(20.dp)).padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("‹", color = Red, fontSize = 27.sp, modifier = Modifier.clickable(onClick = onBack).padding(horizontal = 5.dp))
             Box(Modifier.size(38.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
-                if (otherAvatar.isNotBlank()) AsyncImage(model = otherAvatar, contentDescription = "Аватар собеседника", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                else Text((otherUsername.ifBlank { title }).take(1).uppercase(), color = Red, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                if (!isGroupChat && otherAvatar.isNotBlank()) AsyncImage(model = otherAvatar, contentDescription = "Аватар собеседника", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                else Text(if (isGroupChat) "👥" else (otherUsername.ifBlank { title }).take(1).uppercase(), color = Red, fontWeight = FontWeight.Bold, fontSize = 17.sp)
             }
             Spacer(Modifier.width(9.dp))
-            Column(Modifier.weight(1f).clickable(onClick = onViewProfile)) {
-                Text(otherDisplayName.ifBlank { otherUsername.ifBlank { title } }, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Column(Modifier.weight(1f).clickable(enabled = !isGroupChat, onClick = onViewProfile)) {
+                Text(if (isGroupChat) title else otherDisplayName.ifBlank { otherUsername.ifBlank { title } }, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 val status = if (presenceOnline) "В сети" else presenceLastSeen?.toDate()?.let { date ->
                     val now = java.util.Calendar.getInstance()
                     val then = java.util.Calendar.getInstance().apply { time = date }
@@ -1377,7 +1404,7 @@ private fun ChatScreen(
                     else "Был(а) " + java.text.SimpleDateFormat("dd.MM.yyyy в HH:mm", java.util.Locale.getDefault()).format(date)
                 } ?: "Не в сети"
                 Text(
-                    if (otherTyping) "••• печатает" else status,
+                    if (isGroupChat) "Группа · $groupMemberCount участников" else if (otherTyping) "••• печатает" else status,
                     color = if (otherTyping) Red else if (presenceOnline) Color(0xFF2EAD68) else Muted,
                     fontSize = 10.sp, maxLines = 1
                 )
@@ -1393,6 +1420,10 @@ private fun ChatScreen(
                             db.collection("chats").document(chatId).update("mutedFor", field)
                                 .addOnFailureListener { error = "Не удалось изменить уведомления: ${it.localizedMessage}" }
                         }
+                    )
+                    if (isGroupChat) DropdownMenuItem(
+                        text = { Text("Участники группы") },
+                        onClick = { menuExpanded = false; showMembersDialog = true }
                     )
                     DropdownMenuItem(
                         text = { Text("Удалить чат", color = Color(0xFFE05260)) },
