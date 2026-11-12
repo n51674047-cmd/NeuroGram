@@ -1,0 +1,12 @@
+{
+  "name": "novixgram-functions",
+  "description": "NovixGram Firebase Cloud Functions",
+  "private": true,
+  "engines": { "node": "20" },
+  "main": "index.js",
+  "scripts": { "deploy": "firebase deploy --only functions" },
+  "dependencies": {
+    "firebase-admin": "^13.0.2",
+    "firebase-functions": "^6.3.2"
+  }
+}
