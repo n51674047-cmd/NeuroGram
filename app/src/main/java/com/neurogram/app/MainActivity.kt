@@ -649,7 +649,8 @@ private fun NeuroGramApp() {
         }
     ) {
         Surface(Modifier.fillMaxSize(), color = Bg) {
-            AnimatedContent(
+            Box(Modifier.fillMaxSize()) {
+                AnimatedContent(
                 targetState = page,
                 label = "screen",
                 transitionSpec = {
@@ -717,6 +718,29 @@ private fun NeuroGramApp() {
                             page = "login"
                         }
                     )
+                }
+                AnimatedVisibility(
+                    visible = updateInfo != null,
+                    modifier = Modifier.align(Alignment.TopCenter)
+                        .fillMaxWidth().padding(horizontal = 16.dp)
+                        .statusBarsPadding().padding(top = 8.dp),
+                    enter = fadeIn(tween(220)) + slideInVertically(tween(220)),
+                    exit = fadeOut(tween(180)) + slideOutVertically(tween(180))
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(16.dp))
+                            .clickable(enabled = !updateDownloading, onClick = { installOrDownloadUpdate() })
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("⬆", color = Red, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Доступно обновление ${updateInfo?.version}", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Text(if (updateDownloading) "Загружаем APK…" else "Нажми, чтобы скачать и установить", color = Muted, fontSize = 11.sp)
+                        }
+                        Text(if (updateDownloading) "…" else "Обновить", color = Red, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -895,23 +919,6 @@ private fun ChatList(
             Column {
                 Text("Чаты", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
                 Text(userLabel, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-            }
-            AnimatedVisibility(visible = updateInfo != null, enter = fadeIn(tween(220)) + slideInVertically(tween(220))) {
-                Row(
-                    Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(16.dp))
-                        .clickable(enabled = !updateDownloading, onClick = onUpdate)
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("⬆", color = Red, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Доступно обновление ${updateInfo?.version}", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                        Text(if (updateDownloading) "Загружаем APK…" else "Нажми, чтобы скачать и установить", color = Muted, fontSize = 11.sp)
-                    }
-                    Text(if (updateDownloading) "…" else "Обновить", color = Red, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(Modifier.height(14.dp))
             }
             Spacer(Modifier.height(18.dp))
             Row(Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(15.dp)).padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
