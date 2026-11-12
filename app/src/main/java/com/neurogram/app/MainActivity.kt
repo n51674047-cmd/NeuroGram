@@ -954,7 +954,32 @@ private fun NeuroGramApp() {
                     }
                 }
             }
-            MaintenanceScreen()
+                AnimatedVisibility(
+                    visible = true,
+                    modifier = Modifier.align(Alignment.TopCenter)
+                        .fillMaxWidth().padding(horizontal = 16.dp)
+                        .statusBarsPadding().padding(top = if (updateInfo != null) 92.dp else 8.dp),
+                    enter = fadeIn(tween(300)) + slideInVertically(tween(300)),
+                    exit = fadeOut(tween(200)) + slideOutVertically(tween(200))
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(16.dp))
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier.size(36.dp).background(Red.copy(alpha = 0.13f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("i", color = Red, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(11.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Разработка временно приостановлена", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text("NovixGram продолжает работать. Спасибо, что остаётесь с нами!", color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
+                        }
+                    }
+                }
         }
     }
 }
