@@ -153,36 +153,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-private fun DevelopmentPausedScreen() {
-    Box(
-        modifier = Modifier.fillMaxSize().background(Color(0xFF0B1220)).padding(28.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text("Ⅱ", color = Color(0xFF82AAFF), fontSize = 58.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(24.dp))
-            Text(
-                "Разработка временно остановлена",
-                color = Color.White,
-                fontSize = 25.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(14.dp))
-            Text(
-                "Работа над NovixGram временно приостановлена. " +
-                    "Приложение будет доступно снова после возобновления разработки.",
-                color = Color(0xFFB8C4D8),
-                fontSize = 15.sp,
-                lineHeight = 23.sp
-            )
-        }
-    }
-}
-
 private data class UpdateInfo(val version: String, val apkUrl: String)
 
 private fun isNewerVersion(remote: String, current: String): Boolean {
@@ -263,15 +233,6 @@ private fun NeuroGramApp() {
         return
     }
 
-    // Development pause gate: shown on every launch and intentionally has
-    // no dismiss action. Back navigation is consumed while this screen is visible.
-    var showPauseNotice by remember { mutableStateOf(true) }
-    if (showPauseNotice) {
-        BackHandler(enabled = true) { }
-        DevelopmentPausedScreen()
-        return
-    }
-
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
         appDarkTheme = prefs.getBoolean("dark_theme", false)
@@ -308,7 +269,7 @@ private fun NeuroGramApp() {
                     connectTimeout = 12000
                     readTimeout = 12000
                     setRequestProperty("Accept", "application/vnd.github+json")
-                    setRequestProperty("User-Agent", "NeuroGram-Android")
+                    setRequestProperty("User-Agent", "NovixGram-Android")
                 }
                 if (connection.responseCode in 200..299) {
                     val release = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
@@ -356,11 +317,11 @@ private fun NeuroGramApp() {
         if (!updateDownloading) {
             updateDownloading = true
             val request = DownloadManager.Request(Uri.parse(info.apkUrl))
-                .setTitle("NeuroGram ${info.version}")
+                .setTitle("NovixGram ${info.version}")
                 .setDescription("Загрузка обновления")
                 .setMimeType("application/vnd.android.package-archive")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, "NeuroGram-${info.version}.apk")
+                .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, "NovixGram-${info.version}.apk")
             val queuedDownloadId = manager.enqueue(request)
             downloadedUpdateId = queuedDownloadId
             thread {
@@ -422,7 +383,7 @@ private fun NeuroGramApp() {
                             val members = doc.get("members") as? List<*> ?: emptyList<Any>()
                             val otherId = members.firstOrNull { it?.toString() != uid }?.toString()
                             val names = doc.get("memberNames") as? Map<*, *> ?: emptyMap<Any, Any>()
-                            val title = names[otherId]?.toString() ?: "Диалог NeuroGram"
+                            val title = names[otherId]?.toString() ?: "Диалог NovixGram"
                             val hiddenFor = doc.get("hiddenFor") as? List<*> ?: emptyList<Any>()
                             if (hiddenFor.contains(uid)) return@mapNotNull null
                             val mutedFor = doc.get("mutedFor") as? List<*> ?: emptyList<Any>()
@@ -622,7 +583,7 @@ private fun NeuroGramApp() {
                         }
                         Spacer(Modifier.width(12.dp))
                         Column {
-                            Text("NeuroGram", color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                            Text("NovixGram", color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold)
                             Text("МЕНЮ МЕССЕНДЖЕРА", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp)
                         }
                     }
@@ -649,7 +610,7 @@ private fun NeuroGramApp() {
                             modifier = Modifier.padding(horizontal = 10.dp))
                     }
                     Spacer(Modifier.weight(1f))
-                    Text("NeuroGram • версия ${BuildConfig.VERSION_NAME}", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(20.dp))
+                    Text("NovixGram • версия ${BuildConfig.VERSION_NAME}", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(20.dp))
                 }
             }
         }
@@ -683,7 +644,7 @@ private fun NeuroGramApp() {
                         }
                     )
                     "chats" -> ChatList(
-                        userLabel = currentUser?.email ?: "Аккаунт NeuroGram",
+                        userLabel = currentUser?.email ?: "Аккаунт NovixGram",
                         chats = chats, error = error, loading = loading,
                         updateInfo = updateInfo, updateDownloading = updateDownloading,
                         onUpdate = { installOrDownloadUpdate() },
@@ -782,7 +743,7 @@ private fun BrandHeader() {
         }
         Spacer(Modifier.width(11.dp))
         Column {
-            Text("NeuroGram", color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+            Text("NovixGram", color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
             Text("ОБЩАЙСЯ БЕЗ ГРАНИЦ", color = Muted, fontSize = 9.sp, letterSpacing = 1.1.sp)
         }
     }
@@ -801,7 +762,7 @@ private fun AuthScreen(
         BrandHeader()
         Spacer(Modifier.height(48.dp))
         Text(if (register && awaitingEmailCode) "Подтверди почту" else if (register) "Создать аккаунт" else "С возвращением", color = Ink, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-        Text(if (register && awaitingEmailCode) "Мы отправили четырёхзначный код на $email" else if (register) "Присоединяйся к NeuroGram" else "Войди, чтобы продолжить общение", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp, bottom = 25.dp))
+        Text(if (register && awaitingEmailCode) "Мы отправили четырёхзначный код на $email" else if (register) "Присоединяйся к NovixGram" else "Войди, чтобы продолжить общение", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp, bottom = 25.dp))
         if (register && !awaitingEmailCode) {
             AuthField(nickname, onNickname, "Username (5–20 символов)")
             Spacer(Modifier.height(12.dp))
@@ -1579,7 +1540,7 @@ private fun SettingsScreen(section: String, onBack: () -> Unit) {
                 }
             }
             else -> Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
-                Text("NeuroGram", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("NovixGram", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text("Версия 1.0", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
                 Text("Мессенджер находится в разработке.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
             }
