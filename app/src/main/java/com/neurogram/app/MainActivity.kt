@@ -265,9 +265,12 @@ private fun NeuroGramApp() {
 
     // Development pause gate: shown on every launch and intentionally has
     // no dismiss action. Back navigation is consumed while this screen is visible.
-    BackHandler(enabled = true) { }
-    DevelopmentPausedScreen()
-    return
+    var showPauseNotice by remember { mutableStateOf(true) }
+    if (showPauseNotice) {
+        BackHandler(enabled = true) { }
+        DevelopmentPausedScreen()
+        return
+    }
 
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
