@@ -354,9 +354,6 @@ private fun NeuroGramApp() {
         return
     }
 
-    MaintenanceScreen()
-    return
-
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
         appDarkTheme = prefs.getBoolean("dark_theme", false)
@@ -956,6 +953,7 @@ private fun NeuroGramApp() {
                     }
                 }
             }
+            MaintenanceScreen()
         }
     }
 }
