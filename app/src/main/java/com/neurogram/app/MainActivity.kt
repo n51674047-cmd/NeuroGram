@@ -397,6 +397,39 @@ private fun NeuroGramApp() {
         }
     }
 
+    // Mark incoming messages as delivered as soon as this account receives
+    // them in its active chat list. Read receipts remain separate and are set
+    // only by ChatScreen while the conversation is open.
+    val activeChatIds = chats.map { it.id }
+    DisposableEffect(currentUser?.uid, activeChatIds) {
+        val uid = currentUser?.uid
+        if (uid == null || activeChatIds.isEmpty()) {
+            onDispose { }
+        } else {
+            val registrations = activeChatIds.map { chatId ->
+                db.collection("chats").document(chatId).collection("messages")
+                    .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                    .limit(100)
+                    .addSnapshotListener { snapshot, exception ->
+                        if (exception == null && snapshot != null) {
+                            val undelivered = snapshot.documents.filter { message ->
+                                message.getString("senderId") != uid &&
+                                    message.getTimestamp("deliveredAt") == null
+                            }
+                            if (undelivered.isNotEmpty()) {
+                                val batch = db.batch()
+                                undelivered.forEach { message ->
+                                    batch.update(message.reference, "deliveredAt", FieldValue.serverTimestamp())
+                                }
+                                batch.commit()
+                            }
+                        }
+                    }
+            }
+            onDispose { registrations.forEach { it.remove() } }
+        }
+    }
+
     fun saveProfile(userId: String, userEmail: String, displayName: String, onDone: () -> Unit) {
         val safeName = displayName.ifBlank { userEmail.substringBefore("@") }
         val username = safeName.removePrefix("@").lowercase()
