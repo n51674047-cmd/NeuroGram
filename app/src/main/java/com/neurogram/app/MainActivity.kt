@@ -96,6 +96,11 @@ private fun Modifier.glassSurface(shape: Shape = RoundedCornerShape(20.dp)): Mod
     ).border(1.dp, Color.White.copy(alpha = if (appDarkTheme) 0.10f else 0.78f), shape)
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        @Volatile var isAppVisible: Boolean = false
+            private set
+    }
+
     private val presenceHandler = Handler(Looper.getMainLooper())
     private var presenceRunnable: Runnable? = null
     private var authPresenceListener: FirebaseAuth.AuthStateListener? = null
@@ -135,8 +140,8 @@ class MainActivity : ComponentActivity() {
         presenceRunnable = null
     }
 
-    override fun onStart() { super.onStart(); startPresenceHeartbeat() }
-    override fun onStop() { stopPresenceHeartbeat(); super.onStop() }
+    override fun onStart() { super.onStart(); isAppVisible = true; startPresenceHeartbeat() }
+    override fun onStop() { isAppVisible = false; stopPresenceHeartbeat(); super.onStop() }
 
     override fun onDestroy() {
         stopPresenceHeartbeat()
@@ -503,7 +508,8 @@ private fun NeuroGramApp() {
                                     .filter { it.type == com.google.firebase.firestore.DocumentChange.Type.ADDED }
                                     .forEach { change ->
                                         val message = change.document
-                                        if (message.getString("senderId") != uid && !message.metadata.hasPendingWrites()) {
+                                        if (message.getString("senderId") != uid && !message.metadata.hasPendingWrites() &&
+                                            !(page == "chat" && selectedChatId == chatId)) {
                                             showIncomingMessageNotification(
                                                 context = context,
                                                 chatId = chatId,
