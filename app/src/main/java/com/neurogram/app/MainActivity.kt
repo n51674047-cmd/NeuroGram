@@ -702,7 +702,7 @@ private fun NeuroGramApp() {
                     selectedChatId = chatRef.id; selectedChatTitle = cleanTitle
                     selectedOtherUid = ""; page = "chat"
                 }.addOnFailureListener {
-                    loading = false; error = "Не удалось создать группу: \${it.localizedMessage}"
+                    loading = false; error = "Не удалось создать группу: ${it.localizedMessage}"
                 }
                 return
             }
@@ -710,12 +710,12 @@ private fun NeuroGramApp() {
                 .addOnSuccessListener { result ->
                     val profile = result.documents.firstOrNull()
                     if (profile == null) {
-                        loading = false; error = "Не найден пользователь @\${requested[index]}"; return@addOnSuccessListener
+                        loading = false; error = "Не найден пользователь @${requested[index]}"; return@addOnSuccessListener
                     }
                     resolved.add(profile.id to (profile.getString("displayName") ?: profile.getString("username") ?: requested[index]))
                     resolveNext(index + 1)
                 }.addOnFailureListener {
-                    loading = false; error = "Ошибка поиска участников: \${it.localizedMessage}"
+                    loading = false; error = "Ошибка поиска участников: ${it.localizedMessage}"
                 }
         }
         resolveNext(0)
@@ -1293,7 +1293,7 @@ private fun ChatScreen(
     val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             uploadingMedia = true
-            val ref = storage.reference.child("chats/$chatId/media/image_\${System.currentTimeMillis()}.jpg")
+            val ref = storage.reference.child("chats/$chatId/media/image_${System.currentTimeMillis()}.jpg")
             ref.putFile(uri).continueWithTask { task ->
                 if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
                 ref.downloadUrl
@@ -1302,14 +1302,14 @@ private fun ChatScreen(
                 uploadingMedia = false
             }.addOnFailureListener {
                 uploadingMedia = false
-                error = "Не удалось загрузить фото: \${it.localizedMessage}"
+                error = "Не удалось загрузить фото: ${it.localizedMessage}"
             }
         }
     }
     val videoPicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             uploadingMedia = true
-            val ref = storage.reference.child("chats/$chatId/media/video_\${System.currentTimeMillis()}.mp4")
+            val ref = storage.reference.child("chats/$chatId/media/video_${System.currentTimeMillis()}.mp4")
             ref.putFile(uri).continueWithTask { task ->
                 if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
                 ref.downloadUrl
@@ -1318,7 +1318,7 @@ private fun ChatScreen(
                 uploadingMedia = false
             }.addOnFailureListener {
                 uploadingMedia = false
-                error = "Не удалось загрузить видео: \${it.localizedMessage}"
+                error = "Не удалось загрузить видео: ${it.localizedMessage}"
             }
         }
     }
@@ -1344,7 +1344,7 @@ private fun ChatScreen(
         ))
         batch.update(chatRef, "lastMessage", preview, "updatedAt", FieldValue.serverTimestamp())
         batch.commit().addOnFailureListener {
-            error = "Не удалось отправить сообщение: \${it.localizedMessage}"
+            error = "Не удалось отправить сообщение: ${it.localizedMessage}"
         }.addOnSuccessListener {
             replyingTo = null
         }
@@ -1568,7 +1568,7 @@ private fun ChatScreen(
                             ) {
                                 Column(Modifier.weight(1f, fill = false)) {
                                     if (message.replyToText.isNotBlank()) {
-                                        Text("↪ \${message.replyToText.take(90)}", color = if (mine) Color.White.copy(alpha = 0.78f) else Red,
+                                        Text("↪ ${message.replyToText.take(90)}", color = if (mine) Color.White.copy(alpha = 0.78f) else Red,
                                             fontSize = 11.sp, maxLines = 2, modifier = Modifier.padding(bottom = 4.dp))
                                     }
                                     if (message.mediaType == "image" && message.mediaUrl.isNotBlank()) {
@@ -1615,10 +1615,10 @@ private fun ChatScreen(
                             if (message.reactions.isNotEmpty()) {
                                 Row(Modifier.padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     message.reactions.forEach { (emoji, users) ->
-                                        Text("\$emoji \${users.size}", color = Ink, fontSize = 11.sp,
+                                        Text("$emoji ${users.size}", color = Ink, fontSize = 11.sp,
                                             modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Panel).clickable {
                                                 db.collection("chats").document(chatId).collection("messages").document(message.id)
-                                                    .update("reactions.\$emoji", FieldValue.arrayUnion(myUid))
+                                                    .update("reactions.$emoji", FieldValue.arrayUnion(myUid))
                                             }.padding(horizontal = 7.dp, vertical = 3.dp))
                                     }
                                 }
