@@ -163,7 +163,7 @@ class MainActivity : ComponentActivity() {
 
 private data class UpdateInfo(val version: String, val apkUrl: String)
 
-private fun showIncomingMessageNotification(
+internal fun showIncomingMessageNotification(
     context: android.content.Context,
     chatId: String,
     messageId: String,
@@ -441,6 +441,7 @@ private fun NeuroGramApp() {
     DisposableEffect(auth) {
         val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             currentUser = firebaseAuth.currentUser
+            firebaseAuth.currentUser?.let { syncNovixGramFcmToken(it.uid) }
             page = if (firebaseAuth.currentUser == null) "login" else if (page == "login" || page == "register") "chats" else page
         }
         auth.addAuthStateListener(listener)
