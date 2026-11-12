@@ -2101,7 +2101,7 @@ private fun SettingsScreen(section: String, onBack: () -> Unit) {
                 SettingToggleRow("Предпросмотр сообщений", "Показывать текст в уведомлениях", options["notify_preview"] == true) { setOption("notify_preview", it) }
                 SettingToggleRow("Звук", "Звуковой сигнал новых сообщений", options["notify_sound"] == true) { setOption("notify_sound", it) }
                 SettingToggleRow("Вибрация", "Вибрация при новых сообщениях", options["notify_vibration"] == true) { setOption("notify_vibration", it) }
-                Text("Реальные push-уведомления будут подключены отдельно.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+                Text("Фоновые push-уведомления требуют серверной функции Firebase; на текущем Spark она не развёрнута.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
             }
             "chat_settings" -> Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
                 SettingToggleRow("Отправка клавишей Enter", "Отправлять сообщение нажатием Enter", options["chat_enter_send"] == true) { setOption("chat_enter_send", it) }
