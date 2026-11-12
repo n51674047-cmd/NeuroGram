@@ -1123,21 +1123,27 @@ private fun ChatList(
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(0.dp), contentPadding = PaddingValues(bottom = 90.dp)) {
                     items(filteredChats, key = { it.id }) { chat ->
                         Row(
-                            Modifier.fillMaxWidth().clickable { onOpenChat(chat) }.padding(horizontal = 3.dp, vertical = 12.dp),
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                .clip(RoundedCornerShape(17.dp)).clickable { onOpenChat(chat) }
+                                .background(Panel.copy(alpha = 0.78f))
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(Modifier.size(54.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(52.dp).background(Red.copy(alpha = 0.12f), CircleShape), contentAlignment = Alignment.Center) {
                                 Text(chat.title.take(1).uppercase(), color = Red, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                             }
-                            Spacer(Modifier.width(13.dp))
+                            Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(chat.title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                Text(chat.lastMessage.ifBlank { "Начните переписку" }, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 1)
+                                Text(chat.lastMessage.ifBlank { "Начните переписку" }, color = Muted, fontSize = 12.sp,
+                                    modifier = Modifier.padding(top = 4.dp), maxLines = 1)
                             }
-                            if (chat.isMuted) Text("🔕", fontSize = 13.sp, modifier = Modifier.padding(start = 7.dp))
-                            if (chat.isBlocked) Text("⊘", color = Color(0xFFE05260), fontSize = 16.sp, modifier = Modifier.padding(start = 7.dp))
+                            Column(horizontalAlignment = Alignment.End) {
+                                if (chat.isMuted) Text("🔕", fontSize = 12.sp)
+                                if (chat.isBlocked) Text("Заблокирован", color = Color(0xFFE05260), fontSize = 9.sp)
+                                Text("›", color = Muted, fontSize = 22.sp)
+                            }
                         }
-                        HorizontalDivider(color = Divider.copy(alpha = 0.65f), modifier = Modifier.padding(start = 67.dp))
                     }
                 }
             }
@@ -1255,7 +1261,7 @@ private fun ChatScreen(
     }
 
     Column(Modifier.fillMaxSize().background(Bg).statusBarsPadding().imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(17.dp)).padding(horizontal = 9.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(20.dp)).padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("‹", color = Red, fontSize = 27.sp, modifier = Modifier.clickable(onClick = onBack).padding(horizontal = 5.dp))
             Box(Modifier.size(38.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
                 if (otherAvatar.isNotBlank()) AsyncImage(model = otherAvatar, contentDescription = "Аватар собеседника", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -1350,8 +1356,8 @@ private fun ChatScreen(
                             horizontalAlignment = if (mine) Alignment.End else Alignment.Start
                         ) {
                             Row(
-                                modifier = Modifier.widthIn(max = 290.dp)
-                                    .then(if (mine) Modifier.background(Red, RoundedCornerShape(17.dp)) else Modifier.glassSurface(RoundedCornerShape(17.dp)))
+                                modifier = Modifier.widthIn(max = 310.dp)
+                                    .then(if (mine) Modifier.background(Red, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 5.dp)) else Modifier.glassSurface(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 5.dp, bottomEnd = 18.dp)))
                                     .padding(start = 14.dp, end = 10.dp, top = 9.dp, bottom = 7.dp)
                                     .animateContentSize(),
                                 verticalAlignment = Alignment.Bottom
@@ -1391,8 +1397,8 @@ private fun ChatScreen(
             }
         }
         Row(
-            Modifier.fillMaxWidth(0.94f).align(Alignment.CenterHorizontally)
-                .glassSurface(RoundedCornerShape(22.dp)).padding(5.dp),
+            Modifier.fillMaxWidth().align(Alignment.CenterHorizontally)
+                .glassSurface(RoundedCornerShape(24.dp)).padding(5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedTextField(
@@ -1602,12 +1608,12 @@ private fun ProfileScreen(
         }.addOnFailureListener { loading = false; message = it.localizedMessage ?: "Не удалось сохранить профиль" }
     }
 
-    Column(Modifier.fillMaxSize().background(Bg).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
-        Spacer(Modifier.height(46.dp))
+    Column(Modifier.fillMaxSize().background(Bg).statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+        Spacer(Modifier.height(22.dp))
         Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
         Spacer(Modifier.height(34.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(94.dp).background(Color(0xFFDCEEFF), CircleShape).clickable { picker.launch("image/*") }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(104.dp).background(Red.copy(alpha = 0.12f), CircleShape).clickable { picker.launch("image/*") }, contentAlignment = Alignment.Center) {
                 if (avatarUrl.isNotBlank()) AsyncImage(model = avatarUrl, contentDescription = "Аватар", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 else Text("＋", color = Red, fontSize = 34.sp)
             }
@@ -1622,7 +1628,7 @@ private fun ProfileScreen(
         Text("@${username.ifBlank { "username" }}", color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
         Text(email, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
         Text(bio.ifBlank { "Добавь описание профиля" }, color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 14.dp))
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(24.dp))
         OutlinedButton(onClick = { editUsername = username; editDisplayName = displayName; editBio = bio; showEdit = true }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("Изменить профиль", color = Red) }
         OutlinedButton(onClick = onSettings, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("⚙  Настройки", color = Red) }
         if (message.isNotBlank()) Text(message, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
@@ -1719,7 +1725,7 @@ private fun SettingsScreen(section: String, onBack: () -> Unit) {
             else -> Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
                 Text("NovixGram", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text("Версия ${BuildConfig.VERSION_NAME}", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-                Text("Мессенджер находится в разработке.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+                Text("Общайся, находи людей и настраивай NovixGram под себя.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
             }
         }
     }
