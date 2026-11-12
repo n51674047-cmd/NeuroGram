@@ -153,6 +153,36 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@Composable
+private fun DevelopmentPausedScreen() {
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color(0xFF0B1220)).padding(28.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("Ⅱ", color = Color(0xFF82AAFF), fontSize = 58.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(24.dp))
+            Text(
+                "Разработка временно остановлена",
+                color = Color.White,
+                fontSize = 25.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "Работа над NeuroGram временно приостановлена. " +
+                    "Приложение будет доступно снова после возобновления разработки.",
+                color = Color(0xFFB8C4D8),
+                fontSize = 15.sp,
+                lineHeight = 23.sp
+            )
+        }
+    }
+}
+
 private data class UpdateInfo(val version: String, val apkUrl: String)
 
 private fun isNewerVersion(remote: String, current: String): Boolean {
@@ -232,6 +262,13 @@ private fun NeuroGramApp() {
         NeuroGramSplash(onFinished = { showSplash = false })
         return
     }
+
+    // Development pause gate: shown on every launch and intentionally has
+    // no dismiss action. Back navigation is consumed while this screen is visible.
+    BackHandler(enabled = true) { }
+    DevelopmentPausedScreen()
+    return
+
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
         appDarkTheme = prefs.getBoolean("dark_theme", false)
