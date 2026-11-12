@@ -1288,6 +1288,67 @@ private fun ChatScreen(
     val isBlockedByMe = blockedBy.contains(myUid)
     val isBlockedByOther = blockedBy.contains(otherUid)
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val context = LocalContext.current
+    var uploadingMedia by remember(chatId) { mutableStateOf(false) }
+    val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            uploadingMedia = true
+            val ref = storage.reference.child("chats/$chatId/media/image_\${System.currentTimeMillis()}.jpg")
+            ref.putFile(uri).continueWithTask { task ->
+                if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
+                ref.downloadUrl
+            }.addOnSuccessListener { url ->
+                sendMessageContent("", url.toString(), "image")
+                uploadingMedia = false
+            }.addOnFailureListener {
+                uploadingMedia = false
+                error = "Не удалось загрузить фото: \${it.localizedMessage}"
+            }
+        }
+    }
+    val videoPicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            uploadingMedia = true
+            val ref = storage.reference.child("chats/$chatId/media/video_\${System.currentTimeMillis()}.mp4")
+            ref.putFile(uri).continueWithTask { task ->
+                if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
+                ref.downloadUrl
+            }.addOnSuccessListener { url ->
+                sendMessageContent("", url.toString(), "video")
+                uploadingMedia = false
+            }.addOnFailureListener {
+                uploadingMedia = false
+                error = "Не удалось загрузить видео: \${it.localizedMessage}"
+            }
+        }
+    }
+
+    fun sendMessageContent(text: String, mediaUrl: String = "", mediaType: String = "") {
+        val chatRef = db.collection("chats").document(chatId)
+        val messageRef = chatRef.collection("messages").document()
+        val reply = replyingTo
+        val preview = when {
+            mediaType == "image" -> "📷 Фото"
+            mediaType == "video" -> "▶ Видео"
+            else -> text
+        }
+        val batch = db.batch()
+        batch.set(messageRef, mapOf(
+            "senderId" to myUid, "senderName" to myName,
+            "text" to text, "mediaUrl" to mediaUrl, "mediaType" to mediaType,
+            "replyToId" to (reply?.id ?: ""), "replyToText" to (reply?.text ?: reply?.let { if (it.mediaType == "image") "Фото" else if (it.mediaType == "video") "Видео" else "" } ?: ""),
+            "createdAt" to FieldValue.serverTimestamp(),
+            "clientCreatedAt" to com.google.firebase.Timestamp.now(),
+            "deliveredAt" to null, "readAt" to null,
+            "edited" to false
+        ))
+        batch.update(chatRef, "lastMessage", preview, "updatedAt", FieldValue.serverTimestamp())
+        batch.commit().addOnFailureListener {
+            error = "Не удалось отправить сообщение: \${it.localizedMessage}"
+        }.addOnSuccessListener {
+            replyingTo = null
+        }
+    }
 
     DisposableEffect(otherUid) {
         if (otherUid.isBlank()) {
@@ -1442,6 +1503,19 @@ private fun ChatScreen(
             Text("Этот пользователь ограничил переписку.", color = Muted, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(10.dp))
         }
         if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp)
+        if (pinnedMessageText.isNotBlank()) Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Panel).clickable {
+                val index = messages.indexOfFirst { it.id == pinnedMessageId }
+                if (index >= 0) listState.animateScrollToItem(index)
+            }.padding(11.dp), verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("📌", color = Red)
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Закреплённое сообщение", color = Red, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text(pinnedMessageText, color = Ink, fontSize = 12.sp, maxLines = 1)
+            }
+        }
         val groupedMessages = messages.groupBy { message ->
             message.createdAt?.toDate()?.let {
                 java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(it)
@@ -1483,18 +1557,37 @@ private fun ChatScreen(
                             Modifier.fillMaxWidth().animateContentSize(),
                             horizontalAlignment = if (mine) Alignment.End else Alignment.Start
                         ) {
+                            if (isGroupChat && !mine) Text(message.senderName, color = Red, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
                             Row(
                                 modifier = Modifier.widthIn(max = 310.dp)
                                     .then(if (mine) Modifier.background(Red, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 5.dp)) else Modifier.glassSurface(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 5.dp, bottomEnd = 18.dp)))
+                                    .combinedClickable(onClick = {}, onLongClick = { selectedMessage = message })
                                     .padding(start = 14.dp, end = 10.dp, top = 9.dp, bottom = 7.dp)
                                     .animateContentSize(),
                                 verticalAlignment = Alignment.Bottom
                             ) {
-                                Text(
-                                    message.text, color = if (mine) Color.White else Ink,
-                                    fontSize = 14.sp * appMessageScale,
-                                    modifier = Modifier.weight(1f, fill = false)
-                                )
+                                Column(Modifier.weight(1f, fill = false)) {
+                                    if (message.replyToText.isNotBlank()) {
+                                        Text("↪ \${message.replyToText.take(90)}", color = if (mine) Color.White.copy(alpha = 0.78f) else Red,
+                                            fontSize = 11.sp, maxLines = 2, modifier = Modifier.padding(bottom = 4.dp))
+                                    }
+                                    if (message.mediaType == "image" && message.mediaUrl.isNotBlank()) {
+                                        AsyncImage(model = message.mediaUrl, contentDescription = "Фото в сообщении",
+                                            modifier = Modifier.widthIn(max = 230.dp).heightIn(max = 230.dp).clip(RoundedCornerShape(12.dp)),
+                                            contentScale = ContentScale.Crop)
+                                    } else if (message.mediaType == "video" && message.mediaUrl.isNotBlank()) {
+                                        Text("▶ Открыть видео", color = if (mine) Color.White else Red,
+                                            modifier = Modifier.clickable {
+                                                try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(message.mediaUrl))) }
+                                                catch (_: Exception) { error = "Не удалось открыть видео" }
+                                            }.padding(vertical = 8.dp))
+                                    }
+                                    if (message.text.isNotBlank()) Text(
+                                        message.text + if (message.edited) "  (изменено)" else "",
+                                        color = if (mine) Color.White else Ink,
+                                        fontSize = 14.sp * appMessageScale
+                                    )
+                                }
                                 Spacer(Modifier.width(8.dp))
                                 Text(
                                     timeLabel,
@@ -1519,19 +1612,47 @@ private fun ChatScreen(
                                     )
                                 }
                             }
+                            if (message.reactions.isNotEmpty()) {
+                                Row(Modifier.padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    message.reactions.forEach { (emoji, users) ->
+                                        Text("\$emoji \${users.size}", color = Ink, fontSize = 11.sp,
+                                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Panel).clickable {
+                                                db.collection("chats").document(chatId).collection("messages").document(message.id)
+                                                    .update("reactions.\$emoji", FieldValue.arrayUnion(myUid))
+                                            }.padding(horizontal = 7.dp, vertical = 3.dp))
+                                    }
+                                }
+                            }
+                            Text("⋯", color = Muted, fontSize = 13.sp,
+                                modifier = Modifier.clickable { selectedMessage = message }.padding(horizontal = 7.dp, vertical = 2.dp))
                         }
                     }
                 }
             }
+        }
+        if (replyingTo != null || editingMessageId.isNotBlank()) Row(
+            Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(12.dp)).background(Panel).padding(9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(if (editingMessageId.isNotBlank()) "Редактирование" else "Ответ на сообщение", color = Red, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text(if (editingMessageId.isNotBlank()) "Измени текст и отправь" else replyingTo?.text?.ifBlank { "Медиа" } ?: "",
+                    color = Muted, fontSize = 12.sp, maxLines = 1)
+            }
+            Text("×", color = Muted, modifier = Modifier.clickable {
+                replyingTo = null; editingMessageId = ""; draft = ""
+            }.padding(6.dp))
         }
         Row(
             Modifier.fillMaxWidth().align(Alignment.CenterHorizontally)
                 .glassSurface(RoundedCornerShape(24.dp)).padding(5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Text("▧", color = Red, fontSize = 21.sp, modifier = Modifier.clickable(enabled = !uploadingMedia) { imagePicker.launch("image/*") }.padding(horizontal = 7.dp))
+            Text("▶", color = Red, fontSize = 17.sp, modifier = Modifier.clickable(enabled = !uploadingMedia) { videoPicker.launch("video/*") }.padding(horizontal = 5.dp))
             OutlinedTextField(
                 value = draft, onValueChange = { draft = it },
-                modifier = Modifier.weight(1f), placeholder = { Text("Сообщение…", color = Muted) },
+                modifier = Modifier.weight(1f), placeholder = { Text(if (editingMessageId.isNotBlank()) "Изменить сообщение…" else "Сообщение…", color = Muted) },
                 shape = RoundedCornerShape(17.dp), maxLines = 4,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent,
@@ -1543,27 +1664,20 @@ private fun ChatScreen(
             Button(
                 onClick = {
                     val text = draft.trim()
-                    if (text.isNotEmpty() && !isBlockedByMe && !isBlockedByOther) {
+                    if (editingMessageId.isNotBlank()) {
+                        db.collection("chats").document(chatId).collection("messages").document(editingMessageId)
+                            .update(mapOf("text" to text, "edited" to true, "editedAt" to FieldValue.serverTimestamp()))
+                            .addOnFailureListener { error = "Не удалось изменить сообщение: ${it.localizedMessage}" }
+                        editingMessageId = ""; draft = ""
+                    } else if (text.isNotEmpty() && !isBlockedByMe && !isBlockedByOther) {
                         draft = ""
-                        val chatRef = db.collection("chats").document(chatId)
-                        val messageRef = chatRef.collection("messages").document()
-                        val batch = db.batch()
-                        batch.set(messageRef, mapOf(
-                            "senderId" to myUid, "senderName" to myName,
-                            "text" to text, "createdAt" to FieldValue.serverTimestamp(),
-                            "clientCreatedAt" to com.google.firebase.Timestamp.now(),
-                            "deliveredAt" to null, "readAt" to null
-                        ))
-                        batch.update(chatRef, "lastMessage", text, "updatedAt", FieldValue.serverTimestamp())
-                        batch.commit().addOnFailureListener {
-                            error = "Не удалось отправить сообщение: ${it.localizedMessage}"
-                        }
+                        sendMessageContent(text)
                     }
                 },
-                enabled = draft.isNotBlank() && !isBlockedByMe && !isBlockedByOther,
+                enabled = (draft.isNotBlank() || editingMessageId.isNotBlank()) && !isBlockedByMe && !isBlockedByOther && !uploadingMedia,
                 colors = ButtonDefaults.buttonColors(containerColor = Red),
                 shape = CircleShape, contentPadding = PaddingValues(14.dp)
-            ) { Text("➤", color = Color.White) }
+            ) { Text(if (editingMessageId.isNotBlank()) "✓" else if (uploadingMedia) "…" else "➤", color = Color.White) }
         }
     }
 
