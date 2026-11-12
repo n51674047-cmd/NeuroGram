@@ -1313,6 +1313,7 @@ private fun ChatScreen(
     val isBlockedByMe = blockedBy.contains(myUid)
     val isBlockedByOther = blockedBy.contains(otherUid)
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val chatScope = rememberCoroutineScope()
     val context = LocalContext.current
     var uploadingMedia by remember(chatId) { mutableStateOf(false) }
     fun sendMessageContent(text: String, mediaUrl: String = "", mediaType: String = "") {
@@ -1551,7 +1552,7 @@ private fun ChatScreen(
         if (pinnedMessageText.isNotBlank()) Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Panel).clickable {
                 val index = messages.indexOfFirst { it.id == pinnedMessageId }
-                if (index >= 0) listState.animateScrollToItem(index)
+                if (index >= 0) chatScope.launch { listState.animateScrollToItem(index) }
             }.padding(11.dp), verticalAlignment = Alignment.CenterVertically
         ) {
             Text("📌", color = Red)
