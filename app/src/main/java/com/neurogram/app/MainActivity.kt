@@ -1685,10 +1685,13 @@ private fun SettingsScreen(section: String, onBack: () -> Unit) {
         "appearance" -> "Оформление"
         else -> "О приложении"
     }
-    Column(Modifier.fillMaxSize().background(Bg).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
-        Spacer(Modifier.height(46.dp))
-        Text("‹  Назад", color = Red, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onBack))
-        Spacer(Modifier.height(28.dp))
+    Column(Modifier.fillMaxSize().background(Bg).statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+        Spacer(Modifier.height(22.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("‹", color = Red, fontSize = 28.sp, modifier = Modifier.clickable(onClick = onBack).padding(end = 12.dp))
+            Text("Настройки", color = Muted, fontSize = 14.sp)
+        }
+        Spacer(Modifier.height(22.dp))
         Text(title, color = Ink, fontSize = 27.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(20.dp))
         when(section) {
