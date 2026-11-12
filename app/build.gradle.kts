@@ -13,8 +13,8 @@ android {
         applicationId = "com.neurogram.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.2.9"
+        versionCode = 12
+        versionName = "0.3.0"
     }
 
     buildFeatures {
@@ -47,5 +47,6 @@ dependencies {
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-storage")
+    implementation("com.google.firebase:firebase-messaging")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
