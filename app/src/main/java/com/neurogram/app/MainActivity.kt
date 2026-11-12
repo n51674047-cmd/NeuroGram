@@ -173,7 +173,7 @@ private fun DevelopmentPausedScreen() {
             )
             Spacer(Modifier.height(14.dp))
             Text(
-                "Работа над NeuroGram временно приостановлена. " +
+                "Работа над NovixGram временно приостановлена. " +
                     "Приложение будет доступно снова после возобновления разработки.",
                 color = Color(0xFFB8C4D8),
                 fontSize = 15.sp,
