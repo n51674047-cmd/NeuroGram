@@ -256,7 +256,8 @@ private data class ChatItem(
     val isMuted: Boolean = false,
     val isBlocked: Boolean = false,
     val isGroup: Boolean = false,
-    val memberCount: Int = 2
+    val memberCount: Int = 2,
+    val avatarUrl: String = ""
 )
 
 private data class MessageItem(
@@ -489,7 +490,7 @@ private fun NeuroGramApp() {
                             val blockedBy = doc.get("blockedBy") as? List<*> ?: emptyList<Any>()
                             ChatItem(doc.id, title, doc.getString("lastMessage") ?: "Нет сообщений",
                                 if (isGroup) "" else otherId ?: "", mutedFor.contains(uid), blockedBy.contains(uid),
-                                isGroup, members.size)
+                                isGroup, members.size, doc.getString("avatarUrl") ?: "")
                         }?.sortedByDescending { it.id } ?: emptyList()
                     }
                 }
@@ -1207,7 +1208,8 @@ private fun ChatList(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(Modifier.size(52.dp).background(Red.copy(alpha = 0.12f), CircleShape), contentAlignment = Alignment.Center) {
-                                Text(if (chat.isGroup) "👥" else chat.title.take(1).uppercase(), color = Red, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                                if (chat.avatarUrl.isNotBlank()) AsyncImage(model = chat.avatarUrl, contentDescription = "Аватар чата", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                                else Text(if (chat.isGroup) "👥" else chat.title.take(1).uppercase(), color = Red, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                             }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
@@ -1274,10 +1276,26 @@ private fun ChatScreen(
     var otherTyping by remember(otherUid) { mutableStateOf(false) }
     var isGroupChat by remember(chatId) { mutableStateOf(otherUid.isBlank()) }
     var groupMemberCount by remember(chatId) { mutableIntStateOf(2) }
+    var currentChatTitle by remember(chatId) { mutableStateOf(title) }
+    var groupAvatarUrl by remember(chatId) { mutableStateOf("") }
+    var showEditGroupDialog by remember { mutableStateOf(false) }
+    var editGroupTitle by remember { mutableStateOf(title) }
     var groupMembers by remember(chatId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var groupAdmins by remember(chatId) { mutableStateOf<List<String>>(emptyList()) }
     var showAddMemberDialog by remember { mutableStateOf(false) }
     var newMemberUsername by remember { mutableStateOf("") }
+    val groupAvatarPicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null && myUid in groupAdmins) {
+            val ref = storage.reference.child("chats/$chatId/group_avatar_${System.currentTimeMillis()}.jpg")
+            ref.putFile(uri).continueWithTask { task ->
+                if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
+                ref.downloadUrl
+            }.addOnSuccessListener { url ->
+                db.collection("chats").document(chatId).update("avatarUrl", url.toString())
+                    .addOnFailureListener { error = "Не удалось сохранить фото группы: ${it.localizedMessage}" }
+            }.addOnFailureListener { error = "Не удалось загрузить фото группы: ${it.localizedMessage}" }
+        }
+    }
     var pinnedMessageText by remember(chatId) { mutableStateOf("") }
     var pinnedMessageId by remember(chatId) { mutableStateOf("") }
     var showMembersDialog by remember { mutableStateOf(false) }
@@ -1381,6 +1399,8 @@ private fun ChatScreen(
             if (exception == null && doc != null && doc.exists()) {
                 isGroupChat = doc.getBoolean("isGroup") == true
                 groupMemberCount = (doc.get("members") as? List<*>)?.size ?: 2
+                currentChatTitle = doc.getString("title") ?: title
+                groupAvatarUrl = doc.getString("avatarUrl") ?: ""
                 val names = doc.get("memberNames") as? Map<*, *> ?: emptyMap<Any, Any>()
                 groupMembers = names.mapNotNull { (key, value) -> key?.toString()?.let { it to (value?.toString() ?: it) } }.toMap()
                 groupAdmins = (doc.get("admins") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
@@ -1458,12 +1478,13 @@ private fun ChatScreen(
         Row(Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(20.dp)).padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("‹", color = Red, fontSize = 27.sp, modifier = Modifier.clickable(onClick = onBack).padding(horizontal = 5.dp))
             Box(Modifier.size(38.dp).background(Color(0xFFDCEEFF), CircleShape), contentAlignment = Alignment.Center) {
-                if (!isGroupChat && otherAvatar.isNotBlank()) AsyncImage(model = otherAvatar, contentDescription = "Аватар собеседника", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                if (isGroupChat && groupAvatarUrl.isNotBlank()) AsyncImage(model = groupAvatarUrl, contentDescription = "Фото группы", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                else if (!isGroupChat && otherAvatar.isNotBlank()) AsyncImage(model = otherAvatar, contentDescription = "Аватар собеседника", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 else Text(if (isGroupChat) "👥" else (otherUsername.ifBlank { title }).take(1).uppercase(), color = Red, fontWeight = FontWeight.Bold, fontSize = 17.sp)
             }
             Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f).clickable(enabled = !isGroupChat, onClick = onViewProfile)) {
-                Text(if (isGroupChat) title else otherDisplayName.ifBlank { otherUsername.ifBlank { title } }, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(if (isGroupChat) currentChatTitle else otherDisplayName.ifBlank { otherUsername.ifBlank { title } }, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 val status = if (presenceOnline) "В сети" else presenceLastSeen?.toDate()?.let { date ->
                     val now = java.util.Calendar.getInstance()
                     val then = java.util.Calendar.getInstance().apply { time = date }
@@ -1490,6 +1511,10 @@ private fun ChatScreen(
                             db.collection("chats").document(chatId).update("mutedFor", field)
                                 .addOnFailureListener { error = "Не удалось изменить уведомления: ${it.localizedMessage}" }
                         }
+                    )
+                    if (isGroupChat && myUid in groupAdmins) DropdownMenuItem(
+                        text = { Text("Настройки группы") },
+                        onClick = { menuExpanded = false; editGroupTitle = currentChatTitle; showEditGroupDialog = true }
                     )
                     if (isGroupChat) DropdownMenuItem(
                         text = { Text("Участники группы") },
@@ -1806,12 +1831,31 @@ private fun ChatScreen(
                         }) { Text("Удалить", color = Color(0xFFE05260)) }
                     }
                 }
-                if (myUid in groupAdmins) TextButton(onClick = { showMembersDialog = false; showAddMemberDialog = true }) {
-                    Text("＋ Добавить участника", color = Red)
+                if (myUid in groupAdmins) {
+                    TextButton(onClick = { groupAvatarPicker.launch("image/*") }) { Text("Изменить фото группы", color = Red) }
+                    TextButton(onClick = { showMembersDialog = false; showAddMemberDialog = true }) {
+                        Text("＋ Добавить участника", color = Red)
+                    }
                 }
             }
         },
         confirmButton = { TextButton(onClick = { showMembersDialog = false }) { Text("Готово", color = Red) } },
+        containerColor = Panel
+    )
+
+    if (showEditGroupDialog) AlertDialog(
+        onDismissRequest = { showEditGroupDialog = false },
+        title = { Text("Настройки группы", color = Ink) },
+        text = { OutlinedTextField(value = editGroupTitle, onValueChange = { editGroupTitle = it.take(40) },
+            label = { Text("Название группы") }, singleLine = true) },
+        confirmButton = { TextButton(onClick = {
+            val clean = editGroupTitle.trim()
+            if (clean.isBlank()) error = "Название не может быть пустым"
+            else db.collection("chats").document(chatId).update("title", clean)
+                .addOnSuccessListener { currentChatTitle = clean; showEditGroupDialog = false }
+                .addOnFailureListener { error = "Не удалось изменить группу: ${it.localizedMessage}" }
+        }) { Text("Сохранить", color = Red) } },
+        dismissButton = { TextButton(onClick = { showEditGroupDialog = false }) { Text("Отмена", color = Muted) } },
         containerColor = Panel
     )
 
