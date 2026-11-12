@@ -274,7 +274,8 @@ private data class MessageItem(
     val mediaUrl: String = "",
     val mediaType: String = "",
     val edited: Boolean = false,
-    val reactions: Map<String, List<String>> = emptyMap()
+    val reactions: Map<String, List<String>> = emptyMap(),
+    val forwardedFrom: String = ""
 )
 
 @Composable
@@ -1286,7 +1287,7 @@ private fun ChatScreen(
     var newMemberUsername by remember { mutableStateOf("") }
     val groupAvatarPicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null && myUid in groupAdmins) {
-            val ref = storage.reference.child("chats/$chatId/group_avatar_${System.currentTimeMillis()}.jpg")
+            val ref = storage.reference.child("chats/$chatId/media/group_avatar_${System.currentTimeMillis()}.jpg")
             ref.putFile(uri).continueWithTask { task ->
                 if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
                 ref.downloadUrl
@@ -1425,7 +1426,7 @@ private fun ChatScreen(
                             val users = (value as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
                             key?.toString()?.let { it to users }
                         }.toMap()
-                        MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "", doc.getTimestamp("deliveredAt") != null, doc.getTimestamp("readAt") != null, doc.metadata.hasPendingWrites(), doc.getTimestamp("createdAt") ?: doc.getTimestamp("clientCreatedAt"), doc.getString("replyToId") ?: "", doc.getString("replyToText") ?: "", doc.getString("mediaUrl") ?: "", doc.getString("mediaType") ?: "", doc.getBoolean("edited") == true, reactions)
+                        MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "", doc.getTimestamp("deliveredAt") != null, doc.getTimestamp("readAt") != null, doc.metadata.hasPendingWrites(), doc.getTimestamp("createdAt") ?: doc.getTimestamp("clientCreatedAt"), doc.getString("replyToId") ?: "", doc.getString("replyToText") ?: "", doc.getString("mediaUrl") ?: "", doc.getString("mediaType") ?: "", doc.getBoolean("edited") == true, reactions, doc.getString("forwardedFrom") ?: "")
                     }
                     val batch = db.batch()
                     var changed = false
@@ -1610,6 +1611,7 @@ private fun ChatScreen(
                                 verticalAlignment = Alignment.Bottom
                             ) {
                                 Column(Modifier.weight(1f, fill = false)) {
+                                    if (message.forwardedFrom.isNotBlank()) Text("↗ Переслано от ${message.forwardedFrom}", color = if (mine) Color.White.copy(alpha = 0.78f) else Red, fontSize = 10.sp)
                                     if (message.replyToText.isNotBlank()) {
                                         Text("↪ ${message.replyToText.take(90)}", color = if (mine) Color.White.copy(alpha = 0.78f) else Red,
                                             fontSize = 11.sp, maxLines = 2, modifier = Modifier.padding(bottom = 4.dp))
