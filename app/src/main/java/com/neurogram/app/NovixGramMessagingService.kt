@@ -38,6 +38,9 @@ class NovixGramMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
+        // While the app is visible, Firestore listeners handle foreground alerts.
+        // Suppress FCM here to avoid showing the same message twice.
+        if (MainActivity.isAppVisible) return
         val data = message.data
         val chatId = data["chatId"].orEmpty()
         val messageId = data["messageId"].orEmpty()
