@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity() {
     // may still be using the same account.
     private fun updatePresence() {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
-        val privacy = getSharedPreferences("neurogram_settings", MODE_PRIVATE)
+        val privacy = getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
         val showOnline = privacy.getBoolean("privacy_online", true)
         val data = if (showOnline) mapOf("online" to true, "lastSeen" to FieldValue.serverTimestamp()) else mapOf("online" to false)
         val db = FirebaseFirestore.getInstance()
