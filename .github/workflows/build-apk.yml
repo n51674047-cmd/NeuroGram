@@ -1,4 +1,4 @@
-name: Build NeuroGram APK
+name: Build NovixGram APK
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: neurogram-apk-build
+  group: novixgram-apk-build
   cancel-in-progress: true
 
 jobs:
@@ -50,7 +50,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NeuroGram-debug
+          name: NovixGram-debug
           path: app/build/outputs/apk/debug/app-debug.apk
 
       - name: Read app version
@@ -61,6 +61,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.app_version.outputs.version }}
-          name: NeuroGram ${{ steps.app_version.outputs.version }}
+          name: NovixGram ${{ steps.app_version.outputs.version }}
           make_latest: true
           files: app/build/outputs/apk/debug/app-debug.apk
