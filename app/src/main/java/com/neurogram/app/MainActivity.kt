@@ -113,7 +113,9 @@ class MainActivity : ComponentActivity() {
     // may still be using the same account.
     private fun updatePresence() {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
-        val data = mapOf("online" to true, "lastSeen" to FieldValue.serverTimestamp())
+        val privacy = getSharedPreferences("neurogram_settings", MODE_PRIVATE)
+        val showOnline = privacy.getBoolean("privacy_online", true)
+        val data = if (showOnline) mapOf("online" to true, "lastSeen" to FieldValue.serverTimestamp()) else mapOf("online" to false)
         val db = FirebaseFirestore.getInstance()
         db.runBatch { batch ->
             batch.set(db.collection("publicProfiles").document(uid), data, com.google.firebase.firestore.SetOptions.merge())
@@ -1340,7 +1342,7 @@ private fun ChatScreen(
         batch.set(messageRef, mapOf(
             "senderId" to myUid, "senderName" to myName,
             "text" to text, "mediaUrl" to mediaUrl, "mediaType" to mediaType,
-            "replyToId" to (reply?.id ?: ""), "replyToText" to (reply?.text ?: reply?.let { if (it.mediaType == "image") "Фото" else if (it.mediaType == "video") "Видео" else "" } ?: ""),
+            "replyToId" to (reply?.id ?: ""), "replyToText" to (reply?.text?.takeIf { it.isNotBlank() } ?: reply?.let { if (it.mediaType == "image") "Фото" else if (it.mediaType == "video") "Видео" else "" } ?: ""),
             "createdAt" to FieldValue.serverTimestamp(),
             "clientCreatedAt" to com.google.firebase.Timestamp.now(),
             "deliveredAt" to null, "readAt" to null,
@@ -1410,13 +1412,15 @@ private fun ChatScreen(
                     // Opening/keeping this chat visible means incoming messages are
                     // both delivered and read. Apply both timestamps from the live
                     // snapshot so receipts also work for messages arriving later.
+                    val allowReadReceipts = context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
+                        .getBoolean("privacy_read_receipts", true)
                     docs.filter {
                         it.getString("senderId") != myUid &&
-                            (it.getTimestamp("deliveredAt") == null || it.getTimestamp("readAt") == null)
+                            (it.getTimestamp("deliveredAt") == null || (allowReadReceipts && it.getTimestamp("readAt") == null))
                     }.forEach { doc ->
                         val updates = mutableMapOf<String, Any>()
                         if (doc.getTimestamp("deliveredAt") == null) updates["deliveredAt"] = FieldValue.serverTimestamp()
-                        if (doc.getTimestamp("readAt") == null) updates["readAt"] = FieldValue.serverTimestamp()
+                        if (allowReadReceipts && doc.getTimestamp("readAt") == null) updates["readAt"] = FieldValue.serverTimestamp()
                         if (updates.isNotEmpty()) { batch.update(doc.reference, updates); changed = true }
                     }
                     if (changed) batch.commit()
