@@ -672,16 +672,17 @@ private fun NeuroGramApp() {
         loading = true
         auth.signInWithEmailAndPassword(cleanEmail, password)
             .addOnSuccessListener { result ->
-                val user = result.user
-                if (user == null) {
+                val signedInUser = result.user
+                if (signedInUser == null) {
                     loading = false
                     error = "Firebase не вернул аккаунт"
                     return@addOnSuccessListener
                 }
-                db.collection("users").document(user.uid).get().addOnSuccessListener { profile ->
-                    val existingUsername = profile.getString("username") ?: profile.getString("nickname")
+                val signedInUid = signedInUser.uid
+                db.collection("users").document(signedInUid).get().addOnSuccessListener { profile ->
+                    val existingUsername = profile?.getString("username") ?: profile?.getString("nickname")
                         ?: cleanEmail.substringBefore("@")
-                    saveProfile(user.uid, cleanEmail, existingUsername) {
+                    saveProfile(signedInUid, cleanEmail, existingUsername) {
                         loading = false; error = ""; nickname = existingUsername; page = "chats"
                     }
                 }.addOnFailureListener { loading = false; error = "Не удалось загрузить профиль: ${it.localizedMessage}" }
@@ -745,7 +746,7 @@ private fun NeuroGramApp() {
                     if (profile == null) {
                         loading = false; error = "Не найден пользователь @${requested[index]}"; return@addOnSuccessListener
                     }
-                    resolved.add(profile.id to (profile.getString("displayName") ?: profile.getString("username") ?: requested[index]))
+                    resolved.add(profile.id to (profile?.getString("displayName") ?: profile?.getString("username") ?: requested[index]))
                     resolveNext(index + 1)
                 }.addOnFailureListener {
                     loading = false; error = "Ошибка поиска участников: ${it.localizedMessage}"
@@ -773,7 +774,7 @@ private fun NeuroGramApp() {
                     return@addOnSuccessListener
                 }
                 val otherId = target.id
-                val otherName = target.getString("username") ?: cleanTarget
+                val otherName = target?.getString("username") ?: cleanTarget
                 val myName = nickname.ifBlank { me.email?.substringBefore("@") ?: "Я" }
                 val members = listOf(me.uid, otherId).sorted()
                 val chatId = members.joinToString("_")
