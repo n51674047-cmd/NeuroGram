@@ -2,6 +2,14 @@ package com.neurogram.app
 
 import android.os.Bundle
 import android.app.DownloadManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.Manifest
+import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.content.Intent
 import android.os.Build
 import android.os.Environment
@@ -154,6 +162,71 @@ class MainActivity : ComponentActivity() {
 }
 
 private data class UpdateInfo(val version: String, val apkUrl: String)
+
+private fun showIncomingMessageNotification(
+    context: android.content.Context,
+    chatId: String,
+    messageId: String,
+    senderName: String,
+    messageText: String
+) {
+    val prefs = context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
+    if (!prefs.getBoolean("notify_enabled", true)) return
+    if (Build.VERSION.SDK_INT >= 33 &&
+        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+    ) return
+
+    val soundEnabled = prefs.getBoolean("notify_sound", true)
+    val vibrationEnabled = prefs.getBoolean("notify_vibration", true)
+    val manager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as NotificationManager
+    val channelId = "messages_s${if (soundEnabled) 1 else 0}_v${if (vibrationEnabled) 1 else 0}"
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager.getNotificationChannel(channelId) == null) {
+        val channel = NotificationChannel(channelId, "Сообщения", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Новые сообщения NovixGram"
+            enableVibration(vibrationEnabled)
+            if (soundEnabled) {
+                setSound(
+                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+            } else {
+                setSound(null, null)
+            }
+        }
+        manager.createNotificationChannel(channel)
+    }
+
+    val launchIntent = Intent(context, MainActivity::class.java).apply {
+        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        putExtra("open_chat_id", chatId)
+    }
+    val pendingIntent = PendingIntent.getActivity(
+        context, messageId.hashCode(), launchIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+    val preview = prefs.getBoolean("notify_preview", true)
+    val text = if (preview) messageText.take(140).ifBlank { "Новое сообщение" } else "Новое сообщение"
+    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Notification.Builder(context, channelId)
+    } else {
+        Notification.Builder(context).apply {
+            setPriority(Notification.PRIORITY_HIGH)
+            if (soundEnabled) setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
+            if (vibrationEnabled) setVibrate(longArrayOf(0, 250, 120, 250))
+        }
+    }
+    val notification = builder
+        .setSmallIcon(android.R.drawable.stat_notify_chat)
+        .setContentTitle(senderName.ifBlank { "Новое сообщение" })
+        .setContentText(text)
+        .setAutoCancel(true)
+        .setContentIntent(pendingIntent)
+        .build()
+    manager.notify(messageId.hashCode(), notification)
+}
 
 private fun isNewerVersion(remote: String, current: String): Boolean {
     val r = remote.split(".").map { it.toIntOrNull() ?: 0 }
@@ -355,6 +428,13 @@ private fun NeuroGramApp() {
         if (currentUser != null) {
             page = "chats"
             drawerState.close()
+            val notificationPrefs = context.getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
+            if (notificationPrefs.getBoolean("notify_enabled", true) &&
+                Build.VERSION.SDK_INT >= 33 &&
+                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                activity?.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7301)
+            }
         }
     }
 
@@ -407,11 +487,32 @@ private fun NeuroGramApp() {
             onDispose { }
         } else {
             val registrations = activeChatIds.map { chatId ->
+                var firstSnapshot = true
                 db.collection("chats").document(chatId).collection("messages")
                     .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
                     .limit(100)
                     .addSnapshotListener { snapshot, exception ->
                         if (exception == null && snapshot != null) {
+                            // Ignore the initial history load; notify only for messages
+                            // added after the listener is already watching this chat.
+                            if (firstSnapshot) {
+                                firstSnapshot = false
+                            } else if (chats.firstOrNull { it.id == chatId }?.isMuted != true) {
+                                snapshot.documentChanges
+                                    .filter { it.type == com.google.firebase.firestore.DocumentChange.Type.ADDED }
+                                    .forEach { change ->
+                                        val message = change.document
+                                        if (message.getString("senderId") != uid && !message.metadata.hasPendingWrites()) {
+                                            showIncomingMessageNotification(
+                                                context = context,
+                                                chatId = chatId,
+                                                messageId = message.id,
+                                                senderName = message.getString("senderName") ?: chats.firstOrNull { it.id == chatId }?.title ?: "NovixGram",
+                                                messageText = message.getString("text") ?: ""
+                                            )
+                                        }
+                                    }
+                            }
                             val undelivered = snapshot.documents.filter { message ->
                                 message.getString("senderId") != uid &&
                                     message.getTimestamp("deliveredAt") == null
