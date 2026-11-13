@@ -72,6 +72,11 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.remoteconfig.ConfigUpdate
+import com.google.firebase.remoteconfig.ConfigUpdateListener
+import com.google.firebase.remoteconfig.FirebaseRemoteConfig
+import com.google.firebase.remoteconfig.FirebaseRemoteConfigException
+import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -380,6 +385,50 @@ private fun NeuroGramApp() {
     var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
     var updateDownloading by remember { mutableStateOf(false) }
     var downloadedUpdateId by remember { mutableLongStateOf(-1L) }
+
+    val remoteConfig = remember { FirebaseRemoteConfig.getInstance() }
+    var announcementEnabled by remember { mutableStateOf(false) }
+    var announcementTitle by remember { mutableStateOf("Разработка временно приостановлена") }
+    var announcementMessage by remember { mutableStateOf("NovixGram продолжает работать. Спасибо, что остаётесь с нами!") }
+
+    fun applyRemoteAnnouncement() {
+        announcementEnabled = remoteConfig.getBoolean("announcement_enabled")
+        announcementTitle = remoteConfig.getString("announcement_title").ifBlank { "Объявление" }
+        announcementMessage = remoteConfig.getString("announcement_message")
+    }
+
+    DisposableEffect(remoteConfig) {
+        val registration = remoteConfig.addOnConfigUpdateListener(object : ConfigUpdateListener {
+            override fun onUpdate(configUpdate: ConfigUpdate) {
+                remoteConfig.activate().addOnCompleteListener {
+                    applyRemoteAnnouncement()
+                }
+            }
+
+            override fun onError(error: FirebaseRemoteConfigException) {
+                // Сохраняем последнее полученное объявление; приложение продолжает работать.
+            }
+        })
+        onDispose { registration.remove() }
+    }
+
+    LaunchedEffect(remoteConfig) {
+        val defaults = mapOf(
+            "announcement_enabled" to false,
+            "announcement_title" to "Разработка временно приостановлена",
+            "announcement_message" to "NovixGram продолжает работать. Спасибо, что остаётесь с нами!"
+        )
+        val settings = FirebaseRemoteConfigSettings.Builder()
+            .setMinimumFetchIntervalInSeconds(0)
+            .build()
+        remoteConfig.setDefaultsAsync(defaults).addOnCompleteListener {
+            remoteConfig.setConfigSettingsAsync(settings).addOnCompleteListener {
+                remoteConfig.fetchAndActivate().addOnCompleteListener {
+                    applyRemoteAnnouncement()
+                }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         thread {
@@ -953,9 +1002,8 @@ private fun NeuroGramApp() {
                         Text(if (updateDownloading) "…" else "Обновить", color = Red, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-            }
                 AnimatedVisibility(
-                    visible = true,
+                    visible = announcementEnabled,
                     modifier = Modifier.align(Alignment.TopCenter)
                         .fillMaxWidth().padding(horizontal = 16.dp)
                         .statusBarsPadding().padding(top = if (updateInfo != null) 92.dp else 8.dp),
@@ -975,8 +1023,10 @@ private fun NeuroGramApp() {
                         }
                         Spacer(Modifier.width(11.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("Разработка временно приостановлена", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text("NovixGram продолжает работать. Спасибо, что остаётесь с нами!", color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
+                            Text(announcementTitle, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            if (announcementMessage.isNotBlank()) {
+                                Text(announcementMessage, color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
+                            }
                         }
                     }
                 }
