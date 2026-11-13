@@ -1002,10 +1002,10 @@ private fun NeuroGramApp() {
                         Text(if (updateDownloading) "…" else "Обновить", color = Red, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
+            }
                 AnimatedVisibility(
                     visible = announcementEnabled,
-                    modifier = Modifier.align(Alignment.TopCenter)
-                        .fillMaxWidth().padding(horizontal = 16.dp)
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
                         .statusBarsPadding().padding(top = if (updateInfo != null) 92.dp else 8.dp),
                     enter = fadeIn(tween(300)) + slideInVertically(tween(300)),
                     exit = fadeOut(tween(200)) + slideOutVertically(tween(200))
