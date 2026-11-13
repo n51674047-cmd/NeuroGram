@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity() {
     private val presenceHandler = Handler(Looper.getMainLooper())
     private var presenceRunnable: Runnable? = null
     private var authPresenceListener: FirebaseAuth.AuthStateListener? = null
+    private var pendingNotificationChatId by mutableStateOf<String?>(null)
 
     // Heartbeat instead of a one-time onStart write: an active session stays
     // visible, while a closed app naturally expires after the freshness window.
@@ -158,8 +159,15 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingNotificationChatId = intent.getStringExtra("open_chat_id")
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingNotificationChatId = intent?.getStringExtra("open_chat_id")
         authPresenceListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             if (firebaseAuth.currentUser != null) startPresenceHeartbeat() else stopPresenceHeartbeat()
         }.also { FirebaseAuth.getInstance().addAuthStateListener(it) }
@@ -170,7 +178,10 @@ class MainActivity : ComponentActivity() {
             ) else lightColorScheme(
                 background = Bg, surface = Panel, primary = Red,
                 onBackground = Ink, onSurface = Ink
-            )) { NeuroGramApp() }
+            )) { NeuroGramApp(
+                openChatId = pendingNotificationChatId,
+                onNotificationHandled = { pendingNotificationChatId = null }
+            ) }
         }
     }
 }
@@ -347,7 +358,7 @@ private fun MaintenanceScreen() {
 }
 
 @Composable
-private fun NeuroGramApp() {
+private fun NeuroGramApp(openChatId: String?, onNotificationHandled: () -> Unit) {
     val context = LocalContext.current
     val activity = remember(context) {
         generateSequence(context) { (it as? ContextWrapper)?.baseContext }
@@ -382,6 +393,7 @@ private fun NeuroGramApp() {
     var selectedChatTitle by remember { mutableStateOf("") }
     var selectedOtherUid by remember { mutableStateOf("") }
     var chats by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
+    var chatsLoadedForUid by remember { mutableStateOf<String?>(null) }
     var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
     var updateDownloading by remember { mutableStateOf(false) }
     var downloadedUpdateId by remember { mutableLongStateOf(-1L) }
@@ -549,13 +561,16 @@ private fun NeuroGramApp() {
         val uid = currentUser?.uid
         if (uid == null) {
             chats = emptyList()
+            chatsLoadedForUid = null
             onDispose { }
         } else {
+            chatsLoadedForUid = null
             val registration = db.collection("chats")
                 .whereArrayContains("members", uid)
                 .addSnapshotListener { snapshot, exception ->
                     if (exception != null) {
                         error = "Не удалось загрузить чаты: ${exception.localizedMessage}"
+                        chatsLoadedForUid = uid
                     } else {
                         chats = snapshot?.documents?.mapNotNull { doc ->
                             val members = doc.get("members") as? List<*> ?: emptyList<Any>()
@@ -571,10 +586,28 @@ private fun NeuroGramApp() {
                                 if (isGroup) "" else otherId ?: "", mutedFor.contains(uid), blockedBy.contains(uid),
                                 isGroup, members.size, doc.getString("avatarUrl") ?: "")
                         }?.sortedByDescending { it.id } ?: emptyList()
+                        chatsLoadedForUid = uid
                     }
                 }
             onDispose { registration.remove() }
         }
+    }
+
+    LaunchedEffect(openChatId, currentUser?.uid, chatsLoadedForUid, chats) {
+        val requestedChatId = openChatId ?: return@LaunchedEffect
+        val uid = currentUser?.uid ?: return@LaunchedEffect
+        if (chatsLoadedForUid != uid) return@LaunchedEffect
+
+        val chat = chats.firstOrNull { it.id == requestedChatId }
+        if (chat == null) {
+            error = "Чат из уведомления недоступен или удалён"
+        } else {
+            selectedChatId = chat.id
+            selectedChatTitle = chat.title
+            selectedOtherUid = chat.otherUid
+            page = "chat"
+        }
+        onNotificationHandled()
     }
 
     // Mark incoming messages as delivered as soon as this account receives
