@@ -1060,6 +1060,25 @@ private fun NeuroGramApp(openChatId: String?, onNotificationHandled: () -> Unit)
                             if (announcementMessage.isNotBlank()) {
                                 Text(announcementMessage, color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
                             }
+                            if (updateInfo != null) {
+                                Spacer(Modifier.height(10.dp))
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Red.copy(alpha = 0.12f))
+                                        .clickable(enabled = !updateDownloading) { installOrDownloadUpdate() }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        if (updateDownloading) "Загрузка обновления ${updateInfo?.version}…"
+                                        else "Доступно обновление ${updateInfo?.version} · Обновить",
+                                        color = Red,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
