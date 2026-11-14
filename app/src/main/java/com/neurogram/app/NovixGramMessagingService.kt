@@ -8,19 +8,20 @@ import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
-internal fun syncNovixGramFcmToken(uid: String) {
+internal fun syncNeuroGramFcmToken(uid: String) {
     FirebaseMessaging.getInstance().token
-        .addOnSuccessListener { token -> saveNovixGramFcmToken(uid, token) }
+        .addOnSuccessListener { token -> saveNeuroGramFcmToken(uid, token) }
 }
 
-private fun saveNovixGramFcmToken(uid: String, token: String) {
-    val tokenId = Base64.encodeToString(
-        token.toByteArray(Charsets.UTF_8),
-        Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
-    )
+private fun tokenDocumentId(token: String): String = Base64.encodeToString(
+    token.toByteArray(Charsets.UTF_8),
+    Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+)
+
+private fun saveNeuroGramFcmToken(uid: String, token: String) {
     FirebaseFirestore.getInstance()
         .collection("users").document(uid)
-        .collection("fcmTokens").document(tokenId)
+        .collection("fcmTokens").document(tokenDocumentId(token))
         .set(mapOf(
             "token" to token,
             "platform" to "android",
@@ -28,11 +29,30 @@ private fun saveNovixGramFcmToken(uid: String, token: String) {
         ))
 }
 
+internal fun removeNeuroGramFcmToken(uid: String, onComplete: () -> Unit) {
+    val messaging = FirebaseMessaging.getInstance()
+    messaging.token.addOnCompleteListener { tokenTask ->
+        fun revokeLocalToken() {
+            messaging.deleteToken().addOnCompleteListener { onComplete() }
+        }
+
+        if (!tokenTask.isSuccessful) {
+            revokeLocalToken()
+        } else {
+            FirebaseFirestore.getInstance()
+                .collection("users").document(uid)
+                .collection("fcmTokens").document(tokenDocumentId(tokenTask.result))
+                .delete()
+                .addOnCompleteListener { revokeLocalToken() }
+        }
+    }
+}
+
 class NovixGramMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
         super.onNewToken(token)
         FirebaseAuth.getInstance().currentUser?.uid?.let { uid ->
-            saveNovixGramFcmToken(uid, token)
+            saveNeuroGramFcmToken(uid, token)
         }
     }
 
@@ -49,7 +69,7 @@ class NovixGramMessagingService : FirebaseMessagingService() {
             applicationContext,
             chatId,
             messageId,
-            data["senderName"] ?: "NovixGram",
+            data["senderName"] ?: "NeuroGram",
             data["text"] ?: ""
         )
     }
