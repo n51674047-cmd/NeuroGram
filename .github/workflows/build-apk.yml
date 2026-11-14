@@ -3,6 +3,10 @@ name: Build NovixGram APK
 on:
   push:
     branches: [ "main" ]
+    # Firebase rules and workflow-only edits do not change the APK.
+    paths-ignore:
+      - "firestore.rules"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 concurrency:
