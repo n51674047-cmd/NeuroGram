@@ -1039,7 +1039,7 @@ private fun NeuroGramApp(openChatId: String?, onNotificationHandled: () -> Unit)
             }
                 if (announcementEnabled && !announcementDismissed) {
                     AlertDialog(
-                        onDismissRequest = { announcementDismissed = true },
+                        onDismissRequest = { activity?.finishAffinity() },
                         title = {
                             Text(
                                 "NovixGram",
@@ -1067,7 +1067,7 @@ private fun NeuroGramApp(openChatId: String?, onNotificationHandled: () -> Unit)
                             }
                         },
                         confirmButton = {
-                            TextButton(onClick = { announcementDismissed = true }) {
+                            TextButton(onClick = { activity?.finishAffinity() }) {
                                 Text("Понятно", color = Red, fontWeight = FontWeight.SemiBold)
                             }
                         },
