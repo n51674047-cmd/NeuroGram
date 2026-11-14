@@ -402,6 +402,7 @@ private fun NeuroGramApp(openChatId: String?, onNotificationHandled: () -> Unit)
     var announcementEnabled by remember { mutableStateOf(false) }
     var announcementTitle by remember { mutableStateOf("Разработка временно приостановлена") }
     var announcementMessage by remember { mutableStateOf("NovixGram продолжает работать. Спасибо, что остаётесь с нами!") }
+    var announcementDismissed by remember { mutableStateOf(false) }
 
     fun applyRemoteAnnouncement() {
         announcementEnabled = remoteConfig.getBoolean("announcement_enabled")
@@ -1036,51 +1037,44 @@ private fun NeuroGramApp(openChatId: String?, onNotificationHandled: () -> Unit)
                     }
                 }
             }
-                AnimatedVisibility(
-                    visible = announcementEnabled,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                        .statusBarsPadding().padding(top = if (updateInfo != null) 92.dp else 8.dp),
-                    enter = fadeIn(tween(300)) + slideInVertically(tween(300)),
-                    exit = fadeOut(tween(200)) + slideOutVertically(tween(200))
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().glassSurface(RoundedCornerShape(16.dp))
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            Modifier.size(36.dp).background(Red.copy(alpha = 0.13f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("i", color = Red, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Spacer(Modifier.width(11.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(announcementTitle, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            if (announcementMessage.isNotBlank()) {
-                                Text(announcementMessage, color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
-                            }
-                            if (updateInfo != null) {
-                                Spacer(Modifier.height(10.dp))
-                                Row(
-                                    Modifier.fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(Red.copy(alpha = 0.12f))
-                                        .clickable(enabled = !updateDownloading) { installOrDownloadUpdate() }
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                if (announcementEnabled && !announcementDismissed) {
+                    AlertDialog(
+                        onDismissRequest = { announcementDismissed = true },
+                        title = {
+                            Text(
+                                "NovixGram",
+                                color = Ink,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 21.sp
+                            )
+                        },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text(
+                                    "⚠️ ${announcementTitle}",
+                                    color = Ink,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 16.sp
+                                )
+                                if (announcementMessage.isNotBlank()) {
                                     Text(
-                                        if (updateDownloading) "Загрузка обновления ${updateInfo?.version}…"
-                                        else "Доступно обновление ${updateInfo?.version} · Обновить",
-                                        color = Red,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
+                                        announcementMessage,
+                                        color = Muted,
+                                        fontSize = 14.sp,
+                                        lineHeight = 20.sp
                                     )
                                 }
                             }
-                        }
-                    }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { announcementDismissed = true }) {
+                                Text("Понятно", color = Red, fontWeight = FontWeight.SemiBold)
+                            }
+                        },
+                        containerColor = Panel,
+                        titleContentColor = Ink,
+                        textContentColor = Muted
+                    )
                 }
         }
     }
