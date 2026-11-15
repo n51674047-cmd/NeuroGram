@@ -1,10 +1,11 @@
-name: Firestore Rules Tests
+name: Firebase Security Rules Tests
 
 on:
   push:
     branches: [ "main" ]
     paths:
       - "firestore.rules"
+      - "storage.rules"
       - "firebase.json"
       - "package.json"
       - "tests/**"
@@ -15,7 +16,7 @@ permissions:
   contents: read
 
 jobs:
-  firestore-rules:
+  firebase-rules:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,5 +36,5 @@ jobs:
       - name: Install test dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Run Firestore Rules tests
-        run: npm run test:firestore-rules
+      - name: Run Firestore and Storage Rules tests
+        run: npm run test:firebase-rules
