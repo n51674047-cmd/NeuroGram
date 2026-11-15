@@ -3,9 +3,15 @@ name: Build NeuroGram APK
 on:
   push:
     branches: [ "main" ]
-    # Firebase rules and workflow-only edits do not change the APK.
+    # Backend, rules, documentation, and test-only edits do not change the APK.
     paths-ignore:
       - "firestore.rules"
+      - "storage.rules"
+      - "firebase.json"
+      - "functions/**"
+      - "package.json"
+      - "tests/**"
+      - "README.md"
       - ".github/workflows/**"
   workflow_dispatch:
 
