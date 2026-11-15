@@ -62,7 +62,8 @@ service cloud.firestore {
         return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'members', 'memberNames', 'title', 'avatarUrl',
           'lastMessage', 'updatedAt', 'typingAt',
-          'mutedFor', 'hiddenFor', 'blockedBy'
+          'mutedFor', 'hiddenFor', 'blockedBy',
+          'pinnedMessageId', 'pinnedMessageText'
         ]);
       }
 
@@ -123,6 +124,16 @@ service cloud.firestore {
             && request.resource.data.get('lastMessage', '').size() <= 5000);
       }
 
+      function pinnedFieldsChangeAllowed() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return (!changed.hasAny(['pinnedMessageId']) ||
+            (request.resource.data.get('pinnedMessageId', '') is string
+              && request.resource.data.get('pinnedMessageId', '').size() <= 128))
+          && (!changed.hasAny(['pinnedMessageText']) ||
+            (request.resource.data.get('pinnedMessageText', '') is string
+              && request.resource.data.get('pinnedMessageText', '').size() <= 5000));
+      }
+
       allow create: if signedIn()
         && request.auth.uid in request.resource.data.members
         && request.resource.data.members is list
@@ -143,7 +154,8 @@ service cloud.firestore {
         && userArrayFieldsChangeAllowed()
         && typingFieldChangeAllowed()
         && blockFieldChangeAllowed()
-        && lastMessageChangeAllowed();
+        && lastMessageChangeAllowed()
+        && pinnedFieldsChangeAllowed();
       allow delete: if false;
 
       match /messages/{messageId} {
