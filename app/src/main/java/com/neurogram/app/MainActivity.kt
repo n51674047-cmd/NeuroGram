@@ -2175,6 +2175,7 @@ private fun ProfileScreen(
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
             loading = true
+            val previousAvatarUrl = avatarUrl
             val ref = storage.reference.child("avatars/$uid/profile_${System.currentTimeMillis()}.jpg")
             ref.putFile(uri, createUploadMetadata(context, uri, "image/jpeg")).continueWithTask { task ->
                 if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
@@ -2186,9 +2187,22 @@ private fun ProfileScreen(
                     batch.set(db.collection("users").document(uid), data, com.google.firebase.firestore.SetOptions.merge())
                     batch.set(db.collection("publicProfiles").document(uid), data, com.google.firebase.firestore.SetOptions.merge())
                 }.addOnSuccessListener {
-                    avatarUrl = url; loading = false; message = "Аватар обновлён"
+                    avatarUrl = url
+                    loading = false
+                    message = "Аватар обновлён"
+
+                    if (previousAvatarUrl.isNotBlank() && previousAvatarUrl != url) {
+                        runCatching { storage.getReferenceFromUrl(previousAvatarUrl) }
+                            .getOrNull()
+                            ?.takeIf {
+                                it.path.startsWith("avatars/$uid/") && it.path != ref.path
+                            }
+                            ?.delete()
+                    }
                 }.addOnFailureListener {
-                    loading = false; message = "Фото загружено, но профиль не обновлён: " + it.localizedMessage
+                    ref.delete()
+                    loading = false
+                    message = "Фото загружено, но профиль не обновлён: " + it.localizedMessage
                 }
             }.addOnFailureListener { loading = false; message = "Не удалось загрузить аватар: ${it.localizedMessage}" }
         }
