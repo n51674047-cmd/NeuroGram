@@ -8,10 +8,10 @@ import {
   initializeTestEnvironment
 } from "@firebase/rules-unit-testing";
 
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, updateDoc } from "firebase/firestore";
 import { getBytes, ref, uploadBytes } from "firebase/storage";
 
-const projectId = "demo-neurogram-storage-rules";
+const projectId = "demo-neurogram-rules";
 const firestoreRules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
 const storageRules = await readFile(new URL("../storage.rules", import.meta.url), "utf8");
 
@@ -114,5 +114,32 @@ test("chat members cannot upload unsupported media types", async () => {
     ref(aliceStorage, "chats/members/media/document.pdf"),
     new Uint8Array([8]),
     { contentType: "application/pdf" }
+  ));
+});
+
+
+test("a former chat member loses access to media after leaving the chat", async () => {
+  const path = "chats/members/media/after-leaving.png";
+  const aliceStorage = testEnv.authenticatedContext("alice").storage();
+  const bobStorage = testEnv.authenticatedContext("bob").storage();
+
+  await assertSucceeds(uploadBytes(
+    ref(aliceStorage, path),
+    new Uint8Array([9, 10, 11]),
+    { contentType: "image/png" }
+  ));
+  await assertSucceeds(getBytes(ref(bobStorage, path)));
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await updateDoc(doc(context.firestore(), "chats", "members"), {
+      members: ["alice"]
+    });
+  });
+
+  await assertFails(getBytes(ref(bobStorage, path)));
+  await assertFails(uploadBytes(
+    ref(bobStorage, "chats/members/media/after-leaving-2.png"),
+    new Uint8Array([12]),
+    { contentType: "image/png" }
   ));
 });
