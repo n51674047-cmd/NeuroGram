@@ -143,3 +143,32 @@ test("a former chat member loses access to media after leaving the chat", async 
     { contentType: "image/png" }
   ));
 });
+
+
+test("existing avatar and chat media objects cannot be overwritten", async () => {
+  const aliceStorage = testEnv.authenticatedContext("alice").storage();
+  const avatarRef = ref(aliceStorage, "avatars/alice/avatar-once.png");
+  const mediaRef = ref(aliceStorage, "chats/members/media/photo-once.png");
+
+  await assertSucceeds(uploadBytes(
+    avatarRef,
+    new Uint8Array([1, 2, 3]),
+    { contentType: "image/png" }
+  ));
+  await assertFails(uploadBytes(
+    avatarRef,
+    new Uint8Array([4, 5, 6]),
+    { contentType: "image/png" }
+  ));
+
+  await assertSucceeds(uploadBytes(
+    mediaRef,
+    new Uint8Array([7, 8, 9]),
+    { contentType: "image/png" }
+  ));
+  await assertFails(uploadBytes(
+    mediaRef,
+    new Uint8Array([10, 11, 12]),
+    { contentType: "image/png" }
+  ));
+});
