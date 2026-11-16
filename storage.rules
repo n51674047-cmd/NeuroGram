@@ -11,14 +11,14 @@ service firebase.storage {
 
     match /avatars/{userId}/{fileName} {
       allow read: if signedIn();
-      allow write: if signedIn() && request.auth.uid == userId
+      allow write: if resource == null && signedIn() && request.auth.uid == userId
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
     match /chats/{chatId}/media/{fileName} {
       allow read: if isChatMember(chatId);
-      allow write: if isChatMember(chatId)
+      allow write: if resource == null && isChatMember(chatId)
         && request.resource.size < 50 * 1024 * 1024
         && (request.resource.contentType.matches('image/.*')
           || request.resource.contentType.matches('video/.*'));
