@@ -1488,7 +1488,6 @@ private fun ChatScreen(
     val isBlockedByOther = blockedBy.contains(otherUid)
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val chatScope = rememberCoroutineScope()
-    val context = LocalContext.current
     var uploadingMedia by remember(chatId) { mutableStateOf(false) }
     fun sendMessageContent(text: String, mediaUrl: String = "", mediaType: String = "") {
         val chatRef = db.collection("chats").document(chatId)
