@@ -91,15 +91,15 @@ If you edit an already deployed script, open **Deploy → Manage deployments**, 
 
 The script sends mail from the Google account that owns the Apps Script project. Google Apps Script has daily email quotas, so this is suitable for an early test build, not a high-volume production service. The endpoint is public; it enforces a one-minute resend cooldown per email, a ten-minute code lifetime and five verification attempts.
 
-## Firestore Rules regression tests
+## Firebase Security Rules regression tests
 
-The **Firestore Rules Tests** GitHub Actions workflow checks authorization against the Firestore Emulator whenever `firestore.rules`, the test suite, or its configuration changes. The tests use an isolated `demo-neurogram-rules` project and do not write to the production Firebase database.
+The **Firebase Security Rules Tests** GitHub Actions workflow checks both Firestore and Storage rules in local emulators whenever the rules, test suite, or emulator configuration changes. The tests use the isolated `demo-neurogram-rules` project and do not write to the production Firebase project.
 
 To run the same checks locally, install Node.js 20 and Java 21, then run:
 
 ```bash
 npm install
-npm run test:firestore-rules
+npm run test:firebase-rules
 ```
 
-The suite covers chat membership, group administration, pinning, member-only preferences, typing status, message creation and editing, read receipts, and message length limits.
+The Firestore suite covers chat membership, group administration, pinning, member-only preferences, typing status, message creation and editing, read receipts, and message length limits. The Storage suite covers avatar ownership and size/type limits, chat-media membership checks, and access revocation after a user leaves a chat.
