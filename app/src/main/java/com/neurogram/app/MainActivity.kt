@@ -72,6 +72,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageMetadata
 import com.google.firebase.remoteconfig.ConfigUpdate
 import com.google.firebase.remoteconfig.ConfigUpdateListener
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig
@@ -187,6 +188,21 @@ class MainActivity : ComponentActivity() {
 }
 
 private data class UpdateInfo(val version: String, val apkUrl: String)
+
+private fun createUploadMetadata(
+    context: android.content.Context,
+    uri: Uri,
+    fallbackContentType: String
+): StorageMetadata {
+    val expectedPrefix = fallbackContentType.substringBefore('/')
+    val detectedContentType = runCatching {
+        context.contentResolver.getType(uri)
+    }.getOrNull()?.takeIf { it.startsWith("$expectedPrefix/") }
+
+    return StorageMetadata.Builder()
+        .setContentType(detectedContentType ?: fallbackContentType)
+        .build()
+}
 
 internal fun showIncomingMessageNotification(
     context: android.content.Context,
@@ -1423,6 +1439,7 @@ private fun ChatScreen(
     db: FirebaseFirestore, storage: FirebaseStorage, allChats: List<ChatItem>,
     onBack: () -> Unit, onViewProfile: () -> Unit
 ) {
+    val context = LocalContext.current
     var messages by remember(chatId) { mutableStateOf<List<MessageItem>>(emptyList()) }
     var draft by remember(chatId) { mutableStateOf("") }
     var error by remember(chatId) { mutableStateOf("") }
@@ -1445,7 +1462,7 @@ private fun ChatScreen(
     val groupAvatarPicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null && myUid in groupAdmins) {
             val ref = storage.reference.child("chats/$chatId/media/group_avatar_${System.currentTimeMillis()}.jpg")
-            ref.putFile(uri).continueWithTask { task ->
+            ref.putFile(uri, createUploadMetadata(context, uri, "image/jpeg")).continueWithTask { task ->
                 if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
                 ref.downloadUrl
             }.addOnSuccessListener { url ->
@@ -1504,7 +1521,7 @@ private fun ChatScreen(
         if (uri != null) {
             uploadingMedia = true
             val ref = storage.reference.child("chats/$chatId/media/image_${System.currentTimeMillis()}.jpg")
-            ref.putFile(uri).continueWithTask { task ->
+            ref.putFile(uri, createUploadMetadata(context, uri, "image/jpeg")).continueWithTask { task ->
                 if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
                 ref.downloadUrl
             }.addOnSuccessListener { url ->
@@ -1520,7 +1537,7 @@ private fun ChatScreen(
         if (uri != null) {
             uploadingMedia = true
             val ref = storage.reference.child("chats/$chatId/media/video_${System.currentTimeMillis()}.mp4")
-            ref.putFile(uri).continueWithTask { task ->
+            ref.putFile(uri, createUploadMetadata(context, uri, "video/mp4")).continueWithTask { task ->
                 if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
                 ref.downloadUrl
             }.addOnSuccessListener { url ->
@@ -2128,6 +2145,7 @@ private fun ProfileScreen(
     uid: String, email: String, db: FirebaseFirestore, storage: FirebaseStorage,
     onBack: () -> Unit, onSettings: () -> Unit, onUsernameChanged: (String) -> Unit, onLogout: () -> Unit
 ) {
+    val context = LocalContext.current
     var username by remember(uid) { mutableStateOf("") }
     var displayName by remember(uid) { mutableStateOf("") }
     var editDisplayName by remember(uid) { mutableStateOf("") }
@@ -2159,7 +2177,7 @@ private fun ProfileScreen(
         if (uri != null) {
             loading = true
             val ref = storage.reference.child("avatars/$uid/profile_${System.currentTimeMillis()}.jpg")
-            ref.putFile(uri).continueWithTask { task ->
+            ref.putFile(uri, createUploadMetadata(context, uri, "image/jpeg")).continueWithTask { task ->
                 if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
                 ref.downloadUrl
             }.addOnSuccessListener { download ->
