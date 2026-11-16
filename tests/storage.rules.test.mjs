@@ -9,7 +9,7 @@ import {
 } from "@firebase/rules-unit-testing";
 
 import { doc, setDoc, updateDoc } from "firebase/firestore";
-import { getBytes, ref, uploadBytes } from "firebase/storage";
+import { deleteObject, getBytes, ref, uploadBytes } from "firebase/storage";
 
 const projectId = "demo-neurogram-rules";
 const firestoreRules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
@@ -144,6 +144,28 @@ test("a former chat member loses access to media after leaving the chat", async 
   ));
 });
 
+
+
+test("a user can delete their own avatar but cannot delete another user's avatar", async () => {
+  const aliceStorage = testEnv.authenticatedContext("alice").storage();
+  const bobStorage = testEnv.authenticatedContext("bob").storage();
+  const aliceAvatar = ref(aliceStorage, "avatars/alice/old-avatar.png");
+  const bobAvatar = ref(bobStorage, "avatars/bob/private-avatar.png");
+
+  await assertSucceeds(uploadBytes(
+    aliceAvatar,
+    new Uint8Array([1, 2, 3]),
+    { contentType: "image/png" }
+  ));
+  await assertSucceeds(uploadBytes(
+    bobAvatar,
+    new Uint8Array([4, 5, 6]),
+    { contentType: "image/png" }
+  ));
+
+  await assertSucceeds(deleteObject(aliceAvatar));
+  await assertFails(deleteObject(ref(aliceStorage, "avatars/bob/private-avatar.png")));
+});
 
 test("existing avatar and chat media objects cannot be overwritten", async () => {
   const aliceStorage = testEnv.authenticatedContext("alice").storage();
