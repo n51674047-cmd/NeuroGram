@@ -334,7 +334,7 @@ private fun NeuroGramSplash(onFinished: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.animateContentSize()) {
                 Text("N", color = Red, fontSize = 76.sp, fontWeight = FontWeight.Black)
                 AnimatedVisibility(visible = expanded, enter = expandHorizontally(tween(620)) + fadeIn(tween(500))) {
-                    Text("ovixGram", color = Ink, fontSize = 37.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text("euroGram", color = Ink, fontSize = 37.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
             }
             AnimatedVisibility(visible = expanded, enter = fadeIn(tween(450))) {
@@ -1493,7 +1493,7 @@ private fun ChatScreen(
     var uploadStatus by remember(chatId) { mutableStateOf("") }
     var activeUploadTask by remember(chatId) { mutableStateOf<com.google.firebase.storage.UploadTask?>(null) }
     var uploadCancelRequested by remember(chatId) { mutableStateOf(false) }
-    fun sendMessageContent(text: String, mediaUrl: String = "", mediaType: String = "") {
+    fun sendMessageContent(text: String, mediaUrl: String = "", mediaType: String = ""): com.google.android.gms.tasks.Task<Void> {
         val chatRef = db.collection("chats").document(chatId)
         val messageRef = chatRef.collection("messages").document()
         val reply = replyingTo
@@ -1513,7 +1513,7 @@ private fun ChatScreen(
             "edited" to false
         ))
         batch.update(chatRef, "lastMessage", preview, "updatedAt", FieldValue.serverTimestamp())
-        batch.commit().addOnFailureListener {
+        return batch.commit().addOnFailureListener {
             error = "Не удалось отправить сообщение: ${it.localizedMessage}"
         }.addOnSuccessListener {
             replyingTo = null
@@ -1548,9 +1548,18 @@ private fun ChatScreen(
             uploadStatus = "Подготовка сообщения…"
             ref.downloadUrl.addOnSuccessListener { downloadUrl ->
                 sendMessageContent("", downloadUrl.toString(), mediaType)
-                uploadingMedia = false
-                uploadProgress = 0f
-                uploadStatus = ""
+                    .addOnSuccessListener {
+                        uploadingMedia = false
+                        uploadProgress = 0f
+                        uploadStatus = ""
+                    }
+                    .addOnFailureListener { exception ->
+                        ref.delete()
+                        uploadingMedia = false
+                        uploadProgress = 0f
+                        uploadStatus = ""
+                        error = "Файл загружен, но сообщение не отправлено: ${exception.localizedMessage}"
+                    }
             }.addOnFailureListener { exception ->
                 ref.delete()
                 uploadingMedia = false
@@ -1565,6 +1574,7 @@ private fun ChatScreen(
             uploadProgress = 0f
             uploadStatus = ""
             uploadCancelRequested = false
+            if (wasCancelled) ref.delete()
             error = if (wasCancelled) {
                 "Загрузка отменена"
             } else {
