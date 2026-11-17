@@ -1,6 +1,6 @@
 {
-  "name": "novixgram-functions",
-  "description": "NovixGram Firebase Cloud Functions",
+  "name": "neurogram-functions",
+  "description": "NeuroGram Firebase Cloud Functions",
   "private": true,
   "engines": { "node": "20" },
   "main": "index.js",
