@@ -1489,6 +1489,10 @@ private fun ChatScreen(
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val chatScope = rememberCoroutineScope()
     var uploadingMedia by remember(chatId) { mutableStateOf(false) }
+    var uploadProgress by remember(chatId) { mutableFloatStateOf(0f) }
+    var uploadStatus by remember(chatId) { mutableStateOf("") }
+    var activeUploadTask by remember(chatId) { mutableStateOf<com.google.firebase.storage.UploadTask?>(null) }
+    var uploadCancelRequested by remember(chatId) { mutableStateOf(false) }
     fun sendMessageContent(text: String, mediaUrl: String = "", mediaType: String = "") {
         val chatRef = db.collection("chats").document(chatId)
         val messageRef = chatRef.collection("messages").document()
@@ -1516,37 +1520,64 @@ private fun ChatScreen(
         }
     }
 
-    val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            uploadingMedia = true
-            val ref = storage.reference.child("chats/$chatId/media/image_${System.currentTimeMillis()}.jpg")
-            ref.putFile(uri, createUploadMetadata(context, uri, "image/jpeg")).continueWithTask { task ->
-                if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
-                ref.downloadUrl
-            }.addOnSuccessListener { url ->
-                sendMessageContent("", url.toString(), "image")
+    fun uploadChatMedia(uri: Uri, mediaType: String) {
+        val isVideo = mediaType == "video"
+        val fallbackType = if (isVideo) "video/mp4" else "image/jpeg"
+        val fileName = if (isVideo) {
+            "video_${System.currentTimeMillis()}.mp4"
+        } else {
+            "image_${System.currentTimeMillis()}.jpg"
+        }
+        val ref = storage.reference.child("chats/$chatId/media/$fileName")
+        uploadingMedia = true
+        uploadProgress = 0f
+        uploadStatus = if (isVideo) "Загрузка видео" else "Загрузка фото"
+        uploadCancelRequested = false
+        error = ""
+
+        val task = ref.putFile(uri, createUploadMetadata(context, uri, fallbackType))
+        activeUploadTask = task
+        task.addOnProgressListener { snapshot ->
+            val totalBytes = snapshot.totalByteCount
+            uploadProgress = if (totalBytes > 0L) {
+                (snapshot.bytesTransferred.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+            } else 0f
+        }.addOnSuccessListener {
+            activeUploadTask = null
+            uploadProgress = 1f
+            uploadStatus = "Подготовка сообщения…"
+            ref.downloadUrl.addOnSuccessListener { downloadUrl ->
+                sendMessageContent("", downloadUrl.toString(), mediaType)
                 uploadingMedia = false
-            }.addOnFailureListener {
+                uploadProgress = 0f
+                uploadStatus = ""
+            }.addOnFailureListener { exception ->
+                ref.delete()
                 uploadingMedia = false
-                error = "Не удалось загрузить фото: ${it.localizedMessage}"
+                uploadProgress = 0f
+                uploadStatus = ""
+                error = "Файл загружен, но ссылку получить не удалось: ${exception.localizedMessage}"
+            }
+        }.addOnFailureListener { exception ->
+            val wasCancelled = uploadCancelRequested
+            activeUploadTask = null
+            uploadingMedia = false
+            uploadProgress = 0f
+            uploadStatus = ""
+            uploadCancelRequested = false
+            error = if (wasCancelled) {
+                "Загрузка отменена"
+            } else {
+                "Не удалось загрузить ${if (isVideo) "видео" else "фото"}: ${exception.localizedMessage}"
             }
         }
     }
+
+    val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) uploadChatMedia(uri, "image")
+    }
     val videoPicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            uploadingMedia = true
-            val ref = storage.reference.child("chats/$chatId/media/video_${System.currentTimeMillis()}.mp4")
-            ref.putFile(uri, createUploadMetadata(context, uri, "video/mp4")).continueWithTask { task ->
-                if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Ошибка загрузки")
-                ref.downloadUrl
-            }.addOnSuccessListener { url ->
-                sendMessageContent("", url.toString(), "video")
-                uploadingMedia = false
-            }.addOnFailureListener {
-                uploadingMedia = false
-                error = "Не удалось загрузить видео: ${it.localizedMessage}"
-            }
-        }
+        if (uri != null) uploadChatMedia(uri, "video")
     }
 
 
@@ -1722,6 +1753,33 @@ private fun ChatScreen(
             Text("Этот пользователь ограничил переписку.", color = Muted, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(10.dp))
         }
         if (error.isNotBlank()) Text(error, color = Color(0xFFE05260), fontSize = 12.sp)
+        if (uploadingMedia) Row(
+            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("$uploadStatus · ${(uploadProgress * 100).toInt()}%", color = Muted, fontSize = 11.sp)
+                LinearProgressIndicator(
+                    progress = uploadProgress,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    color = Red
+                )
+            }
+            if (activeUploadTask != null) TextButton(onClick = {
+                val task = activeUploadTask
+                if (task != null) {
+                    uploadCancelRequested = true
+                    if (task.cancel()) {
+                        uploadStatus = "Отмена загрузки…"
+                    } else {
+                        uploadCancelRequested = false
+                        uploadStatus = "Завершение загрузки…"
+                    }
+                }
+            }) {
+                Text("Отмена", color = Red)
+            }
+        }
         if (pinnedMessageText.isNotBlank()) Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Panel).clickable {
                 val index = messages.indexOfFirst { it.id == pinnedMessageId }
