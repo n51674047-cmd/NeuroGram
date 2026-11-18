@@ -239,7 +239,7 @@ private fun readLocalMediaDetails(
     if (sizeBytes == null) {
         sizeBytes = runCatching {
             context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
-                descriptor.length().takeIf { it >= 0L }
+                descriptor.length.takeIf { it >= 0L }
             }
         }.getOrNull()
     }
