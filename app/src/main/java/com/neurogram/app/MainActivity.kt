@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
         val privacy = getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
         val showOnline = privacy.getBoolean("privacy_online", true)
-        val data = if (showOnline) mapOf("online" to true, "lastSeen" to FieldValue.serverTimestamp()) else mapOf("online" to false)
+        val data = if (showOnline) mapOf("showOnlineStatus" to true, "online" to true, "lastSeen" to FieldValue.serverTimestamp()) else mapOf("showOnlineStatus" to false, "online" to false)
         val db = FirebaseFirestore.getInstance()
         db.runBatch { batch ->
             batch.set(db.collection("publicProfiles").document(uid), data, com.google.firebase.firestore.SetOptions.merge())
@@ -1498,6 +1498,7 @@ private fun ChatScreen(
     var otherUsername by remember(otherUid) { mutableStateOf("") }
     var otherDisplayName by remember(otherUid) { mutableStateOf("") }
     var presenceOnline by remember(otherUid) { mutableStateOf(false) }
+    var presenceHidden by remember(otherUid) { mutableStateOf(false) }
     var presenceLastSeen by remember(otherUid) { mutableStateOf<com.google.firebase.Timestamp?>(null) }
     var otherTyping by remember(otherUid) { mutableStateOf(false) }
     var isGroupChat by remember(chatId) { mutableStateOf(otherUid.isBlank()) }
@@ -1664,9 +1665,10 @@ private fun ChatScreen(
                     otherAvatar = doc.getString("avatarUrl") ?: ""
                     otherUsername = doc.getString("username") ?: doc.getString("nickname") ?: ""
                     otherDisplayName = doc.getString("displayName") ?: otherUsername
-                    presenceLastSeen = doc.getTimestamp("lastSeen")
+                    presenceHidden = doc.getBoolean("showOnlineStatus") == false
+                    presenceLastSeen = if (presenceHidden) null else doc.getTimestamp("lastSeen")
                     val fresh = presenceLastSeen?.toDate()?.let { System.currentTimeMillis() - it.time < 90_000L } == true
-                    presenceOnline = doc.getBoolean("online") == true && fresh
+                    presenceOnline = !presenceHidden && doc.getBoolean("online") == true && fresh
                 }
             }
         onDispose { otherListener.remove() }
@@ -1765,7 +1767,7 @@ private fun ChatScreen(
             Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f).clickable(enabled = !isGroupChat, onClick = onViewProfile)) {
                 Text(if (isGroupChat) currentChatTitle else otherDisplayName.ifBlank { otherUsername.ifBlank { title } }, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                val status = if (presenceOnline) "В сети" else presenceLastSeen?.toDate()?.let { date ->
+                val status = if (presenceHidden) "Статус скрыт" else if (presenceOnline) "В сети" else presenceLastSeen?.toDate()?.let { date ->
                     val now = java.util.Calendar.getInstance()
                     val then = java.util.Calendar.getInstance().apply { time = date }
                     val time = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(date)
@@ -2499,7 +2501,32 @@ private fun SettingsScreen(section: String, onBack: () -> Unit) {
         "notify_enabled" to true, "notify_preview" to true, "notify_sound" to true, "notify_vibration" to true,
         "chat_enter_send" to false, "chat_media_auto" to false)
     val options = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply { defaults.forEach { (k, v) -> put(k, prefs.getBoolean(k, v)) } } }
-    fun setOption(key: String, value: Boolean) { options[key] = value; prefs.edit().putBoolean(key, value).apply() }
+    var privacySyncMessage by remember { mutableStateOf("") }
+    fun setOption(key: String, value: Boolean) {
+        options[key] = value
+        prefs.edit().putBoolean(key, value).apply()
+        if (key == "privacy_online") {
+            val uid = FirebaseAuth.getInstance().currentUser?.uid
+            if (uid == null) {
+                privacySyncMessage = "Войдите в аккаунт, чтобы синхронизировать настройку."
+            } else {
+                val presenceData = if (value) {
+                    mapOf("showOnlineStatus" to true, "online" to true, "lastSeen" to FieldValue.serverTimestamp())
+                } else {
+                    mapOf("showOnlineStatus" to false, "online" to false)
+                }
+                val db = FirebaseFirestore.getInstance()
+                db.runBatch { batch ->
+                    batch.set(db.collection("publicProfiles").document(uid), presenceData, com.google.firebase.firestore.SetOptions.merge())
+                    batch.set(db.collection("users").document(uid), presenceData, com.google.firebase.firestore.SetOptions.merge())
+                }.addOnSuccessListener {
+                    privacySyncMessage = if (value) "Статус активности снова виден." else "Статус активности скрыт."
+                }.addOnFailureListener {
+                    privacySyncMessage = "Не удалось синхронизировать настройку: ${it.localizedMessage}"
+                }
+            }
+        }
+    }
     fun saveTheme(value: Boolean) { appDarkTheme = value; prefs.edit().putBoolean("dark_theme", value).apply() }
     fun saveScale(value: Float) { appMessageScale = value; prefs.edit().putFloat("message_scale", value).apply() }
     val title = when(section) {
@@ -2524,7 +2551,7 @@ private fun SettingsScreen(section: String, onBack: () -> Unit) {
                 SettingToggleRow("Отчёты о прочтении", "Разрешить отметки о прочтении сообщений", options["privacy_read_receipts"] == true) { setOption("privacy_read_receipts", it) }
                 SettingToggleRow("Фото профиля всем", "Разрешить другим пользователям видеть фото", options["privacy_photo"] == true) { setOption("privacy_photo", it) }
                 SettingToggleRow("Разрешить поиск по телефону", "Поиск аккаунта по номеру телефона", options["privacy_phone"] == true) { setOption("privacy_phone", it) }
-                Text("Настройки приватности пока сохраняются локально; серверное применение требует отдельной реализации.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+                Text(privacySyncMessage.ifBlank { "Скрытие статуса также скрывает время последнего посещения. Остальные параметры пока сохраняются на этом устройстве." }, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
             }
             "notifications" -> Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(18.dp)).padding(17.dp)) {
                 SettingToggleRow("Уведомления", "Общий переключатель уведомлений", options["notify_enabled"] == true) { setOption("notify_enabled", it) }
