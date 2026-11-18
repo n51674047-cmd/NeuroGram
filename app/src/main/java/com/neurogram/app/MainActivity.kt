@@ -14,6 +14,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import android.provider.OpenableColumns
 import android.app.Activity
 import android.content.ContextWrapper
 import android.os.Handler
@@ -202,6 +203,56 @@ private fun createUploadMetadata(
     return StorageMetadata.Builder()
         .setContentType(detectedContentType ?: fallbackContentType)
         .build()
+}
+
+
+private data class LocalMediaDetails(val name: String, val sizeBytes: Long?)
+
+private fun readLocalMediaDetails(
+    context: android.content.Context,
+    uri: Uri
+): LocalMediaDetails {
+    var name = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "Файл"
+    var sizeBytes: Long? = null
+
+    runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex >= 0) {
+                    cursor.getString(nameIndex)?.takeIf { it.isNotBlank() }?.let { name = it }
+                }
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                    sizeBytes = cursor.getLong(sizeIndex).takeIf { it >= 0L }
+                }
+            }
+        }
+    }
+
+    if (sizeBytes == null) {
+        sizeBytes = runCatching {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+                descriptor.length().takeIf { it >= 0L }
+            }
+        }.getOrNull()
+    }
+    return LocalMediaDetails(name, sizeBytes)
+}
+
+private fun formatMediaSize(sizeBytes: Long?): String {
+    val bytes = sizeBytes ?: return "Размер не определён"
+    if (bytes < 0L) return "Размер не определён"
+    if (bytes < 1024L) return "$bytes Б"
+    if (bytes < 1024L * 1024L) return "${(bytes + 512L) / 1024L} КБ"
+    val tenths = (bytes * 10L) / (1024L * 1024L)
+    return "${tenths / 10L}.${tenths % 10L} МБ"
 }
 
 internal fun showIncomingMessageNotification(
@@ -1492,7 +1543,19 @@ private fun ChatScreen(
     var uploadProgress by remember(chatId) { mutableFloatStateOf(0f) }
     var uploadStatus by remember(chatId) { mutableStateOf("") }
     var activeUploadTask by remember(chatId) { mutableStateOf<com.google.firebase.storage.UploadTask?>(null) }
+    var pendingMediaUri by remember(chatId) { mutableStateOf<Uri?>(null) }
+    var pendingMediaType by remember(chatId) { mutableStateOf("") }
+    var pendingMediaName by remember(chatId) { mutableStateOf("") }
+    var pendingMediaSize by remember(chatId) { mutableStateOf<Long?>(null) }
     var uploadCancelRequested by remember(chatId) { mutableStateOf(false) }
+    fun prepareMediaPreview(uri: Uri, mediaType: String) {
+        val details = readLocalMediaDetails(context, uri)
+        pendingMediaUri = uri
+        pendingMediaType = mediaType
+        pendingMediaName = details.name
+        pendingMediaSize = details.sizeBytes
+    }
+
     fun sendMessageContent(text: String, mediaUrl: String = "", mediaType: String = ""): com.google.android.gms.tasks.Task<Void> {
         val chatRef = db.collection("chats").document(chatId)
         val messageRef = chatRef.collection("messages").document()
@@ -1584,10 +1647,10 @@ private fun ChatScreen(
     }
 
     val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) uploadChatMedia(uri, "image")
+        if (uri != null) prepareMediaPreview(uri, "image")
     }
     val videoPicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) uploadChatMedia(uri, "video")
+        if (uri != null) prepareMediaPreview(uri, "video")
     }
 
 
@@ -2144,6 +2207,65 @@ private fun ChatScreen(
         dismissButton = { TextButton(onClick = { showBlockConfirm = false }) { Text("Отмена", color = Muted) } },
         containerColor = Panel
     )
+
+    if (pendingMediaUri != null) {
+        val previewUri = pendingMediaUri
+        val previewType = pendingMediaType
+        AlertDialog(
+            onDismissRequest = {
+                pendingMediaUri = null
+                pendingMediaType = ""
+                pendingMediaName = ""
+                pendingMediaSize = null
+            },
+            title = { Text(if (previewType == "image") "Предпросмотр фото" else "Предпросмотр видео", color = Ink) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    if (previewType == "image") {
+                        AsyncImage(
+                            model = previewUri,
+                            contentDescription = "Предпросмотр фотографии",
+                            modifier = Modifier.fillMaxWidth().height(220.dp)
+                                .clip(RoundedCornerShape(14.dp)).background(Bg),
+                            contentScale = ContentScale.Fit
+                        )
+                    } else {
+                        Box(
+                            Modifier.fillMaxWidth().height(160.dp)
+                                .clip(RoundedCornerShape(14.dp)).background(Bg),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("▶", color = Red, fontSize = 54.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Text(pendingMediaName, color = Ink, fontSize = 13.sp, maxLines = 2)
+                    Text(formatMediaSize(pendingMediaSize), color = Muted, fontSize = 12.sp)
+                    Text("Файл будет отправлен только после подтверждения.", color = Muted, fontSize = 11.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val uri = pendingMediaUri
+                    val type = pendingMediaType
+                    pendingMediaUri = null
+                    pendingMediaType = ""
+                    pendingMediaName = ""
+                    pendingMediaSize = null
+                    if (uri != null && type.isNotBlank()) uploadChatMedia(uri, type)
+                }) { Text("Отправить", color = Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    pendingMediaUri = null
+                    pendingMediaType = ""
+                    pendingMediaName = ""
+                    pendingMediaSize = null
+                }) { Text("Отмена", color = Muted) }
+            },
+            containerColor = Panel
+        )
+    }
+
 }
 
 @Composable
