@@ -227,3 +227,31 @@ test("message text longer than 5000 characters is rejected", async () => {
     edited: false
   }));
 });
+
+
+test("a user can hide their online and last-seen status only on their own public profile", async () => {
+  const aliceDb = testEnv.authenticatedContext("alice").firestore();
+  const bobDb = testEnv.authenticatedContext("bob").firestore();
+  const aliceProfile = doc(aliceDb, "publicProfiles", "alice");
+
+  await assertSucceeds(setDoc(aliceProfile, {
+    uid: "alice",
+    online: true,
+    showOnlineStatus: true,
+    lastSeen: Timestamp.now()
+  }));
+
+  await assertSucceeds(updateDoc(aliceProfile, {
+    showOnlineStatus: false,
+    online: false
+  }));
+
+  await assertFails(updateDoc(doc(bobDb, "publicProfiles", "alice"), {
+    showOnlineStatus: true,
+    online: true
+  }));
+
+  const visibleToBob = await assertSucceeds(getDoc(doc(bobDb, "publicProfiles", "alice")));
+  assert.equal(visibleToBob.data().showOnlineStatus, false);
+  assert.equal(visibleToBob.data().online, false);
+});
