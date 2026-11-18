@@ -255,3 +255,32 @@ test("a user can hide their online and last-seen status only on their own public
   assert.equal(visibleToBob.data().showOnlineStatus, false);
   assert.equal(visibleToBob.data().online, false);
 });
+
+
+test("public presence is readable by others only while the owner enables activity visibility", async () => {
+  const aliceDb = testEnv.authenticatedContext("alice").firestore();
+  const bobDb = testEnv.authenticatedContext("bob").firestore();
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const adminDb = context.firestore();
+    await setDoc(doc(adminDb, "users", "alice"), {
+      uid: "alice",
+      showOnlineStatus: true
+    });
+    await setDoc(doc(adminDb, "publicPresence", "alice"), {
+      online: true,
+      lastSeen: Timestamp.now()
+    });
+  });
+
+  const alicePresence = doc(aliceDb, "publicPresence", "alice");
+  const bobPresence = doc(bobDb, "publicPresence", "alice");
+
+  await assertSucceeds(getDoc(bobPresence));
+  await assertSucceeds(updateDoc(doc(aliceDb, "users", "alice"), {
+    showOnlineStatus: false
+  }));
+  await assertFails(getDoc(bobPresence));
+  await assertSucceeds(getDoc(alicePresence));
+  await assertFails(updateDoc(bobPresence, { online: false }));
+});
