@@ -121,14 +121,9 @@ class MainActivity : ComponentActivity() {
     // may still be using the same account.
     private fun updatePresence() {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
-        val privacy = getSharedPreferences("neurogram_settings", android.content.Context.MODE_PRIVATE)
-        val showOnline = privacy.getBoolean("privacy_online", true)
-        val data = if (showOnline) mapOf("showOnlineStatus" to true, "online" to true, "lastSeen" to FieldValue.serverTimestamp()) else mapOf("showOnlineStatus" to false, "online" to false)
-        val db = FirebaseFirestore.getInstance()
-        db.runBatch { batch ->
-            batch.set(db.collection("publicProfiles").document(uid), data, com.google.firebase.firestore.SetOptions.merge())
-            batch.set(db.collection("users").document(uid), data, com.google.firebase.firestore.SetOptions.merge())
-        }
+        val data = mapOf("online" to true, "lastSeen" to FieldValue.serverTimestamp())
+        FirebaseFirestore.getInstance().collection("publicPresence").document(uid)
+            .set(data, com.google.firebase.firestore.SetOptions.merge())
     }
 
     private fun startPresenceHeartbeat() {
@@ -1655,23 +1650,39 @@ private fun ChatScreen(
     }
 
 
-    DisposableEffect(otherUid) {
+    DisposableEffect(otherUid, presenceHidden) {
         if (otherUid.isBlank()) {
             onDispose { }
         } else {
-        val otherListener = db.collection("publicProfiles").document(otherUid)
-            .addSnapshotListener { doc, exception ->
-                if (exception == null && doc != null && doc.exists()) {
-                    otherAvatar = doc.getString("avatarUrl") ?: ""
-                    otherUsername = doc.getString("username") ?: doc.getString("nickname") ?: ""
-                    otherDisplayName = doc.getString("displayName") ?: otherUsername
-                    presenceHidden = doc.getBoolean("showOnlineStatus") == false
-                    presenceLastSeen = if (presenceHidden) null else doc.getTimestamp("lastSeen")
-                    val fresh = presenceLastSeen?.toDate()?.let { System.currentTimeMillis() - it.time < 90_000L } == true
-                    presenceOnline = !presenceHidden && doc.getBoolean("online") == true && fresh
+            val profileListener = db.collection("publicProfiles").document(otherUid)
+                .addSnapshotListener { doc, exception ->
+                    if (exception == null && doc != null && doc.exists()) {
+                        otherAvatar = doc.getString("avatarUrl") ?: ""
+                        otherUsername = doc.getString("username") ?: doc.getString("nickname") ?: ""
+                        otherDisplayName = doc.getString("displayName") ?: otherUsername
+                        presenceHidden = doc.getBoolean("showOnlineStatus") == false
+                        if (presenceHidden) {
+                            presenceLastSeen = null
+                            presenceOnline = false
+                        }
+                    }
                 }
+            val presenceListener = if (presenceHidden) null else {
+                db.collection("publicPresence").document(otherUid)
+                    .addSnapshotListener { doc, exception ->
+                        if (exception == null && doc != null && doc.exists() && !presenceHidden) {
+                            presenceLastSeen = doc.getTimestamp("lastSeen")
+                            val fresh = presenceLastSeen?.toDate()?.let {
+                                System.currentTimeMillis() - it.time < 90_000L
+                            } == true
+                            presenceOnline = doc.getBoolean("online") == true && fresh
+                        }
+                    }
             }
-        onDispose { otherListener.remove() }
+            onDispose {
+                profileListener.remove()
+                presenceListener?.remove()
+            }
         }
     }
 
@@ -2510,15 +2521,11 @@ private fun SettingsScreen(section: String, onBack: () -> Unit) {
             if (uid == null) {
                 privacySyncMessage = "Войдите в аккаунт, чтобы синхронизировать настройку."
             } else {
-                val presenceData = if (value) {
-                    mapOf("showOnlineStatus" to true, "online" to true, "lastSeen" to FieldValue.serverTimestamp())
-                } else {
-                    mapOf("showOnlineStatus" to false, "online" to false)
-                }
+                val privacyData = mapOf("showOnlineStatus" to value)
                 val db = FirebaseFirestore.getInstance()
                 db.runBatch { batch ->
-                    batch.set(db.collection("publicProfiles").document(uid), presenceData, com.google.firebase.firestore.SetOptions.merge())
-                    batch.set(db.collection("users").document(uid), presenceData, com.google.firebase.firestore.SetOptions.merge())
+                    batch.set(db.collection("publicProfiles").document(uid), privacyData, com.google.firebase.firestore.SetOptions.merge())
+                    batch.set(db.collection("users").document(uid), privacyData, com.google.firebase.firestore.SetOptions.merge())
                 }.addOnSuccessListener {
                     privacySyncMessage = if (value) "Статус активности снова виден." else "Статус активности скрыт."
                 }.addOnFailureListener {
