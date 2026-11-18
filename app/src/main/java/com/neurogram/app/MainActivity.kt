@@ -113,10 +113,29 @@ class MainActivity : ComponentActivity() {
     private val presenceHandler = Handler(Looper.getMainLooper())
     private var presenceRunnable: Runnable? = null
     private var authPresenceListener: FirebaseAuth.AuthStateListener? = null
+    private var legacyPresenceCleanupUid: String? = null
     private var pendingNotificationChatId by mutableStateOf<String?>(null)
 
-    // Heartbeat instead of a one-time onStart write: an active session stays
-    // visible, while a closed app naturally expires after the freshness window.
+    // Remove the old publicly readable presence fields left by earlier versions.
+    private fun cleanupLegacyPresenceFields(uid: String) {
+        if (legacyPresenceCleanupUid == uid) return
+        legacyPresenceCleanupUid = uid
+        val profileRef = FirebaseFirestore.getInstance().collection("publicProfiles").document(uid)
+        profileRef.get().addOnSuccessListener { doc ->
+            if (doc.exists() && (doc.contains("online") || doc.contains("lastSeen"))) {
+                profileRef.update(mapOf(
+                    "online" to FieldValue.delete(),
+                    "lastSeen" to FieldValue.delete()
+                )).addOnFailureListener {
+                    if (legacyPresenceCleanupUid == uid) legacyPresenceCleanupUid = null
+                }
+            }
+        }.addOnFailureListener {
+            if (legacyPresenceCleanupUid == uid) legacyPresenceCleanupUid = null
+        }
+    }
+
+    // Heartbeats live in a separate collection; Firestore Rules decide who may read them.
     // We deliberately do not write online=false onStop because another device
     // may still be using the same account.
     private fun updatePresence() {
@@ -128,7 +147,8 @@ class MainActivity : ComponentActivity() {
 
     private fun startPresenceHeartbeat() {
         stopPresenceHeartbeat()
-        if (FirebaseAuth.getInstance().currentUser == null) return
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        cleanupLegacyPresenceFields(uid)
         updatePresence()
         val task = object : Runnable {
             override fun run() {
@@ -2513,6 +2533,23 @@ private fun SettingsScreen(section: String, onBack: () -> Unit) {
         "chat_enter_send" to false, "chat_media_auto" to false)
     val options = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply { defaults.forEach { (k, v) -> put(k, prefs.getBoolean(k, v)) } } }
     var privacySyncMessage by remember { mutableStateOf("") }
+    DisposableEffect(section) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (section != "privacy" || uid.isNullOrBlank()) {
+            onDispose { }
+        } else {
+            val listener = FirebaseFirestore.getInstance().collection("users").document(uid)
+                .addSnapshotListener { doc, exception ->
+                    if (exception == null && doc != null && doc.exists()) {
+                        doc.getBoolean("showOnlineStatus")?.let { remoteValue ->
+                            options["privacy_online"] = remoteValue
+                            prefs.edit().putBoolean("privacy_online", remoteValue).apply()
+                        }
+                    }
+                }
+            onDispose { listener.remove() }
+        }
+    }
     fun setOption(key: String, value: Boolean) {
         options[key] = value
         prefs.edit().putBoolean(key, value).apply()
@@ -2521,7 +2558,11 @@ private fun SettingsScreen(section: String, onBack: () -> Unit) {
             if (uid == null) {
                 privacySyncMessage = "Войдите в аккаунт, чтобы синхронизировать настройку."
             } else {
-                val privacyData = mapOf("showOnlineStatus" to value)
+                val privacyData = mapOf(
+                    "showOnlineStatus" to value,
+                    "online" to FieldValue.delete(),
+                    "lastSeen" to FieldValue.delete()
+                )
                 val db = FirebaseFirestore.getInstance()
                 db.runBatch { batch ->
                     batch.set(db.collection("publicProfiles").document(uid), privacyData, com.google.firebase.firestore.SetOptions.merge())
