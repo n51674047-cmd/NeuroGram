@@ -22,6 +22,7 @@ import android.os.Looper
 import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Matrix
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
@@ -293,6 +294,18 @@ private fun compressChatImageForUpload(
             )
             if (resized !== bitmap) bitmap.recycle()
             bitmap = resized
+        }
+
+        if (bitmap.hasAlpha()) {
+            val flattened = Bitmap.createBitmap(
+                bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888
+            )
+            Canvas(flattened).apply {
+                drawColor(android.graphics.Color.WHITE)
+                drawBitmap(bitmap, 0f, 0f, null)
+            }
+            bitmap.recycle()
+            bitmap = flattened
         }
 
         val outputFile = File.createTempFile("neurogram_chat_", ".jpg", context.cacheDir)
@@ -2423,19 +2436,20 @@ private fun ChatScreen(
                             chatScope.launch {
                                 var compressedUri: Uri? = null
                                 try {
-                                    compressedUri = withContext(Dispatchers.IO) {
+                                    val preparedUri = withContext(Dispatchers.IO) {
                                         compressChatImageForUpload(context, uri)
                                     }
-                                    val compressedSize = compressedUri.path?.let { File(it).length() }
+                                    compressedUri = preparedUri
+                                    val compressedSize = preparedUri.path?.let { File(it).length() }
                                     val useOriginal = originalSize != null &&
                                         compressedSize != null &&
                                         compressedSize >= originalSize
-                                    val uploadUri = if (useOriginal) uri else compressedUri
+                                    val uploadUri = if (useOriginal) uri else preparedUri
                                     val temporaryUri = if (useOriginal) {
-                                        compressedUri.path?.let { File(it).delete() }
+                                        preparedUri.path?.let { File(it).delete() }
                                         null
                                     } else {
-                                        compressedUri
+                                        preparedUri
                                     }
                                     val statusLabel = if (
                                         originalSize != null &&
