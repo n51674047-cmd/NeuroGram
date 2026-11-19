@@ -20,6 +20,13 @@ import android.content.ContextWrapper
 import android.os.Handler
 import android.os.Looper
 import android.net.Uri
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import androidx.exifinterface.media.ExifInterface
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
@@ -68,6 +75,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -220,6 +229,89 @@ private fun createUploadMetadata(
         .build()
 }
 
+
+private const val MAX_CHAT_IMAGE_EDGE = 2048
+private const val CHAT_IMAGE_JPEG_QUALITY = 88
+
+private fun compressChatImageForUpload(
+    context: android.content.Context,
+    sourceUri: Uri
+): Uri {
+    val resolver = context.contentResolver
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    resolver.openInputStream(sourceUri)?.use {
+        BitmapFactory.decodeStream(it, null, bounds)
+    } ?: throw IOException("Не удалось открыть фотографию")
+
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+        throw IOException("Не удалось определить размер фотографии")
+    }
+
+    var sampleSize = 1
+    while (
+        maxOf(bounds.outWidth / sampleSize, bounds.outHeight / sampleSize) >
+        MAX_CHAT_IMAGE_EDGE
+    ) {
+        sampleSize *= 2
+    }
+
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    var bitmap = resolver.openInputStream(sourceUri)?.use {
+        BitmapFactory.decodeStream(it, null, options)
+    } ?: throw IOException("Не удалось декодировать фотографию")
+
+    try {
+        val exif = runCatching {
+            resolver.openInputStream(sourceUri)?.use { ExifInterface(it) }
+        }.getOrNull()
+        val rotation = exif?.rotationDegrees ?: 0
+        val flipped = exif?.isFlipped ?: false
+
+        if (rotation != 0 || flipped) {
+            val transform = Matrix().apply {
+                if (rotation != 0) postRotate(rotation.toFloat())
+                if (flipped) postScale(-1f, 1f)
+            }
+            val corrected = Bitmap.createBitmap(
+                bitmap, 0, 0, bitmap.width, bitmap.height, transform, true
+            )
+            if (corrected !== bitmap) bitmap.recycle()
+            bitmap = corrected
+        }
+
+        val longestEdge = maxOf(bitmap.width, bitmap.height)
+        if (longestEdge > MAX_CHAT_IMAGE_EDGE) {
+            val scale = MAX_CHAT_IMAGE_EDGE.toFloat() / longestEdge.toFloat()
+            val resized = Bitmap.createScaledBitmap(
+                bitmap,
+                (bitmap.width * scale).toInt().coerceAtLeast(1),
+                (bitmap.height * scale).toInt().coerceAtLeast(1),
+                true
+            )
+            if (resized !== bitmap) bitmap.recycle()
+            bitmap = resized
+        }
+
+        val outputFile = File.createTempFile("neurogram_chat_", ".jpg", context.cacheDir)
+        try {
+            FileOutputStream(outputFile).use { output ->
+                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, CHAT_IMAGE_JPEG_QUALITY, output)) {
+                    throw IOException("Не удалось сжать фотографию")
+                }
+                output.flush()
+            }
+        } catch (exception: Exception) {
+            outputFile.delete()
+            throw exception
+        }
+        return Uri.fromFile(outputFile)
+    } finally {
+        bitmap.recycle()
+    }
+}
 
 private data class LocalMediaDetails(val name: String, val sizeBytes: Long?)
 
@@ -1599,22 +1691,47 @@ private fun ChatScreen(
         }
     }
 
-    fun uploadChatMedia(uri: Uri, mediaType: String) {
+    fun uploadChatMedia(
+        uri: Uri,
+        mediaType: String,
+        temporaryUri: Uri? = null,
+        statusLabel: String? = null
+    ) {
+        fun cleanupTemporaryFile() {
+            temporaryUri?.path?.let { File(it).delete() }
+        }
+
         val isVideo = mediaType == "video"
         val fallbackType = if (isVideo) "video/mp4" else "image/jpeg"
+        val imageExtension = when (context.contentResolver.getType(uri)?.lowercase()) {
+            "image/png" -> "png"
+            "image/webp" -> "webp"
+            "image/heic" -> "heic"
+            "image/heif" -> "heif"
+            else -> "jpg"
+        }
         val fileName = if (isVideo) {
             "video_${System.currentTimeMillis()}.mp4"
         } else {
-            "image_${System.currentTimeMillis()}.jpg"
+            "image_${System.currentTimeMillis()}.$imageExtension"
         }
         val ref = storage.reference.child("chats/$chatId/media/$fileName")
         uploadingMedia = true
         uploadProgress = 0f
-        uploadStatus = if (isVideo) "Загрузка видео" else "Загрузка фото"
+        uploadStatus = statusLabel ?: if (isVideo) "Загрузка видео" else "Загрузка фото"
         uploadCancelRequested = false
         error = ""
 
-        val task = ref.putFile(uri, createUploadMetadata(context, uri, fallbackType))
+        val task = try {
+            ref.putFile(uri, createUploadMetadata(context, uri, fallbackType))
+        } catch (exception: Exception) {
+            cleanupTemporaryFile()
+            uploadingMedia = false
+            uploadProgress = 0f
+            uploadStatus = ""
+            error = "Не удалось начать загрузку: ${exception.localizedMessage}"
+            return
+        }
         activeUploadTask = task
         task.addOnProgressListener { snapshot ->
             val totalBytes = snapshot.totalByteCount
@@ -1628,12 +1745,14 @@ private fun ChatScreen(
             ref.downloadUrl.addOnSuccessListener { downloadUrl ->
                 sendMessageContent("", downloadUrl.toString(), mediaType)
                     .addOnSuccessListener {
+                        cleanupTemporaryFile()
                         uploadingMedia = false
                         uploadProgress = 0f
                         uploadStatus = ""
                     }
                     .addOnFailureListener { exception ->
                         ref.delete()
+                        cleanupTemporaryFile()
                         uploadingMedia = false
                         uploadProgress = 0f
                         uploadStatus = ""
@@ -1641,6 +1760,7 @@ private fun ChatScreen(
                     }
             }.addOnFailureListener { exception ->
                 ref.delete()
+                cleanupTemporaryFile()
                 uploadingMedia = false
                 uploadProgress = 0f
                 uploadStatus = ""
@@ -1649,6 +1769,7 @@ private fun ChatScreen(
         }.addOnFailureListener { exception ->
             val wasCancelled = uploadCancelRequested
             activeUploadTask = null
+            cleanupTemporaryFile()
             uploadingMedia = false
             uploadProgress = 0f
             uploadStatus = ""
@@ -1865,11 +1986,18 @@ private fun ChatScreen(
         ) {
             Column(Modifier.weight(1f)) {
                 Text("$uploadStatus · ${(uploadProgress * 100).toInt()}%", color = Muted, fontSize = 11.sp)
-                LinearProgressIndicator(
-                    progress = uploadProgress,
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    color = Red
-                )
+                if (activeUploadTask == null) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        color = Red
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = uploadProgress,
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        color = Red
+                    )
+                }
             }
             if (activeUploadTask != null) TextButton(onClick = {
                 val task = activeUploadTask
@@ -2280,11 +2408,57 @@ private fun ChatScreen(
                 TextButton(onClick = {
                     val uri = pendingMediaUri
                     val type = pendingMediaType
+                    val originalSize = pendingMediaSize
                     pendingMediaUri = null
                     pendingMediaType = ""
                     pendingMediaName = ""
                     pendingMediaSize = null
-                    if (uri != null && type.isNotBlank()) uploadChatMedia(uri, type)
+                    if (uri != null && type.isNotBlank()) {
+                        if (type == "image") {
+                            uploadingMedia = true
+                            uploadProgress = 0f
+                            uploadStatus = "Подготовка фото…"
+                            uploadCancelRequested = false
+                            error = ""
+                            chatScope.launch {
+                                var compressedUri: Uri? = null
+                                try {
+                                    compressedUri = withContext(Dispatchers.IO) {
+                                        compressChatImageForUpload(context, uri)
+                                    }
+                                    val compressedSize = compressedUri.path?.let { File(it).length() }
+                                    val useOriginal = originalSize != null &&
+                                        compressedSize != null &&
+                                        compressedSize >= originalSize
+                                    val uploadUri = if (useOriginal) uri else compressedUri
+                                    val temporaryUri = if (useOriginal) {
+                                        compressedUri.path?.let { File(it).delete() }
+                                        null
+                                    } else {
+                                        compressedUri
+                                    }
+                                    val statusLabel = if (
+                                        originalSize != null &&
+                                        compressedSize != null &&
+                                        compressedSize < originalSize
+                                    ) {
+                                        "Фото: ${formatMediaSize(originalSize)} → ${formatMediaSize(compressedSize)}"
+                                    } else {
+                                        "Загрузка фото · ${formatMediaSize(if (useOriginal) originalSize else compressedSize)}"
+                                    }
+                                    uploadChatMedia(uploadUri, "image", temporaryUri, statusLabel)
+                                } catch (exception: Exception) {
+                                    compressedUri?.path?.let { File(it).delete() }
+                                    uploadingMedia = false
+                                    uploadProgress = 0f
+                                    uploadStatus = ""
+                                    error = "Не удалось подготовить фото: ${exception.localizedMessage ?: "неизвестная ошибка"}"
+                                }
+                            }
+                        } else {
+                            uploadChatMedia(uri, type)
+                        }
+                    }
                 }) { Text("Отправить", color = Red) }
             },
             dismissButton = {
