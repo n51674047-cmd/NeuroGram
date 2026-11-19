@@ -22,7 +22,6 @@ import android.os.Looper
 import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
 import android.graphics.Matrix
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
@@ -224,9 +223,18 @@ private fun createUploadMetadata(
     val detectedContentType = runCatching {
         context.contentResolver.getType(uri)
     }.getOrNull()?.takeIf { it.startsWith("$expectedPrefix/") }
+    val extensionContentType = when (uri.lastPathSegment?.substringAfterLast('.', "")?.lowercase()) {
+        "jpg", "jpeg" -> "image/jpeg"
+        "png" -> "image/png"
+        "webp" -> "image/webp"
+        "heic" -> "image/heic"
+        "heif" -> "image/heif"
+        "mp4" -> "video/mp4"
+        else -> null
+    }?.takeIf { it.startsWith("$expectedPrefix/") }
 
     return StorageMetadata.Builder()
-        .setContentType(detectedContentType ?: fallbackContentType)
+        .setContentType(detectedContentType ?: extensionContentType ?: fallbackContentType)
         .build()
 }
 
@@ -296,22 +304,14 @@ private fun compressChatImageForUpload(
             bitmap = resized
         }
 
-        if (bitmap.hasAlpha()) {
-            val flattened = Bitmap.createBitmap(
-                bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888
-            )
-            Canvas(flattened).apply {
-                drawColor(android.graphics.Color.WHITE)
-                drawBitmap(bitmap, 0f, 0f, null)
-            }
-            bitmap.recycle()
-            bitmap = flattened
-        }
-
-        val outputFile = File.createTempFile("neurogram_chat_", ".jpg", context.cacheDir)
+        val keepsTransparency = bitmap.hasAlpha()
+        val outputFormat = if (keepsTransparency) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+        val outputQuality = if (keepsTransparency) 100 else CHAT_IMAGE_JPEG_QUALITY
+        val outputExtension = if (keepsTransparency) ".png" else ".jpg"
+        val outputFile = File.createTempFile("neurogram_chat_", outputExtension, context.cacheDir)
         try {
             FileOutputStream(outputFile).use { output ->
-                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, CHAT_IMAGE_JPEG_QUALITY, output)) {
+                if (!bitmap.compress(outputFormat, outputQuality, output)) {
                     throw IOException("Не удалось сжать фотографию")
                 }
                 output.flush()
@@ -1721,7 +1721,13 @@ private fun ChatScreen(
             "image/webp" -> "webp"
             "image/heic" -> "heic"
             "image/heif" -> "heif"
-            else -> "jpg"
+            else -> when (uri.lastPathSegment?.substringAfterLast('.', "")?.lowercase()) {
+                "png" -> "png"
+                "webp" -> "webp"
+                "heic" -> "heic"
+                "heif" -> "heif"
+                else -> "jpg"
+            }
         }
         val fileName = if (isVideo) {
             "video_${System.currentTimeMillis()}.mp4"
