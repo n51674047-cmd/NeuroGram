@@ -77,6 +77,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -244,8 +246,14 @@ private const val CHAT_IMAGE_JPEG_QUALITY = 88
 
 private fun compressChatImageForUpload(
     context: android.content.Context,
-    sourceUri: Uri
+    sourceUri: Uri,
+    isCancelled: () -> Boolean = { false }
 ): Uri {
+    fun ensureNotCancelled() {
+        if (isCancelled()) throw CancellationException("Подготовка фото отменена")
+    }
+
+    ensureNotCancelled()
     val resolver = context.contentResolver
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     resolver.openInputStream(sourceUri)?.use {
@@ -255,6 +263,7 @@ private fun compressChatImageForUpload(
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
         throw IOException("Не удалось определить размер фотографии")
     }
+    ensureNotCancelled()
 
     var sampleSize = 1
     while (
@@ -273,9 +282,11 @@ private fun compressChatImageForUpload(
     } ?: throw IOException("Не удалось декодировать фотографию")
 
     try {
+        ensureNotCancelled()
         val exif = runCatching {
             resolver.openInputStream(sourceUri)?.use { ExifInterface(it) }
         }.getOrNull()
+        ensureNotCancelled()
         val rotation = exif?.rotationDegrees ?: 0
         val flipped = exif?.isFlipped ?: false
 
@@ -291,6 +302,7 @@ private fun compressChatImageForUpload(
             bitmap = corrected
         }
 
+        ensureNotCancelled()
         val longestEdge = maxOf(bitmap.width, bitmap.height)
         if (longestEdge > MAX_CHAT_IMAGE_EDGE) {
             val scale = MAX_CHAT_IMAGE_EDGE.toFloat() / longestEdge.toFloat()
@@ -310,12 +322,14 @@ private fun compressChatImageForUpload(
         val outputExtension = if (keepsTransparency) ".png" else ".jpg"
         val outputFile = File.createTempFile("neurogram_chat_", outputExtension, context.cacheDir)
         try {
+            ensureNotCancelled()
             FileOutputStream(outputFile).use { output ->
                 if (!bitmap.compress(outputFormat, outputQuality, output)) {
                     throw IOException("Не удалось сжать фотографию")
                 }
                 output.flush()
             }
+            ensureNotCancelled()
         } catch (exception: Exception) {
             outputFile.delete()
             throw exception
@@ -1664,6 +1678,7 @@ private fun ChatScreen(
     var uploadProgress by remember(chatId) { mutableFloatStateOf(0f) }
     var uploadStatus by remember(chatId) { mutableStateOf("") }
     var activeUploadTask by remember(chatId) { mutableStateOf<com.google.firebase.storage.UploadTask?>(null) }
+    var activePreparationJob by remember(chatId) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var pendingMediaUri by remember(chatId) { mutableStateOf<Uri?>(null) }
     var pendingMediaType by remember(chatId) { mutableStateOf("") }
     var pendingMediaName by remember(chatId) { mutableStateOf("") }
@@ -2018,7 +2033,7 @@ private fun ChatScreen(
                     )
                 }
             }
-            if (activeUploadTask != null) TextButton(onClick = {
+            if (activeUploadTask != null || activePreparationJob != null) TextButton(onClick = {
                 val task = activeUploadTask
                 if (task != null) {
                     uploadCancelRequested = true
@@ -2028,6 +2043,10 @@ private fun ChatScreen(
                         uploadCancelRequested = false
                         uploadStatus = "Завершение загрузки…"
                     }
+                } else {
+                    uploadCancelRequested = true
+                    uploadStatus = "Отмена подготовки…"
+                    activePreparationJob?.cancel()
                 }
             }) {
                 Text("Отмена", color = Red)
@@ -2439,11 +2458,13 @@ private fun ChatScreen(
                             uploadStatus = "Подготовка фото…"
                             uploadCancelRequested = false
                             error = ""
-                            chatScope.launch {
+                            val preparationJob = chatScope.launch(start = CoroutineStart.LAZY) {
                                 var compressedUri: Uri? = null
                                 try {
                                     val preparedUri = withContext(Dispatchers.IO) {
-                                        compressChatImageForUpload(context, uri)
+                                        compressChatImageForUpload(context, uri) {
+                                            activePreparationJob?.isActive == false
+                                        }
                                     }
                                     compressedUri = preparedUri
                                     val compressedSize = preparedUri.path?.let { File(it).length() }
@@ -2467,14 +2488,25 @@ private fun ChatScreen(
                                         "Загрузка фото · ${formatMediaSize(if (useOriginal) originalSize else compressedSize)}"
                                     }
                                     uploadChatMedia(uploadUri, "image", temporaryUri, statusLabel)
+                                } catch (exception: CancellationException) {
+                                    compressedUri?.path?.let { File(it).delete() }
+                                    uploadingMedia = false
+                                    uploadProgress = 0f
+                                    uploadStatus = ""
+                                    uploadCancelRequested = false
+                                    error = "Подготовка фото отменена"
                                 } catch (exception: Exception) {
                                     compressedUri?.path?.let { File(it).delete() }
                                     uploadingMedia = false
                                     uploadProgress = 0f
                                     uploadStatus = ""
                                     error = "Не удалось подготовить фото: ${exception.localizedMessage ?: "неизвестная ошибка"}"
+                                } finally {
+                                    activePreparationJob = null
                                 }
                             }
+                            activePreparationJob = preparationJob
+                            preparationJob.start()
                         } else {
                             uploadChatMedia(uri, type)
                         }
