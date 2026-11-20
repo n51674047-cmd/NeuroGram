@@ -70,6 +70,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1617,6 +1621,75 @@ private fun ChatList(
     }
 }
 
+@Composable
+private fun MediaImageViewer(imageUrl: String, onDismiss: () -> Unit) {
+    var scale by remember(imageUrl) { mutableFloatStateOf(1f) }
+    var offsetX by remember(imageUrl) { mutableFloatStateOf(0f) }
+    var offsetY by remember(imageUrl) { mutableFloatStateOf(0f) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            Modifier.fillMaxSize().background(Color.Black)
+        ) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = "Фотография на весь экран",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+                    .pointerInput(imageUrl) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            val nextScale = (scale * zoom).coerceIn(1f, 5f)
+                            scale = nextScale
+                            if (nextScale <= 1f) {
+                                offsetX = 0f
+                                offsetY = 0f
+                            } else {
+                                offsetX += pan.x
+                                offsetY += pan.y
+                            }
+                        }
+                    }
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offsetX
+                        translationY = offsetY
+                    }
+            )
+
+            Row(
+                Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (scale > 1.01f) {
+                    TextButton(onClick = {
+                        scale = 1f
+                        offsetX = 0f
+                        offsetY = 0f
+                    }) {
+                        Text("Сбросить", color = Color.White)
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Закрыть", color = Color.White)
+                }
+            }
+
+            Text(
+                "Увеличивай двумя пальцами · перемещай увеличенное фото",
+                color = Color.White.copy(alpha = 0.78f),
+                fontSize = 12.sp,
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .navigationBarsPadding().padding(16.dp)
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatScreen(
@@ -1664,6 +1737,7 @@ private fun ChatScreen(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showBlockConfirm by remember { mutableStateOf(false) }
     var selectedMessage by remember { mutableStateOf<MessageItem?>(null) }
+    var viewingImageUrl by remember(chatId) { mutableStateOf<String?>(null) }
     var replyingTo by remember(chatId) { mutableStateOf<MessageItem?>(null) }
     var editingMessageId by remember(chatId) { mutableStateOf("") }
     var showForwardDialog by remember { mutableStateOf(false) }
@@ -2123,7 +2197,9 @@ private fun ChatScreen(
                                     }
                                     if (message.mediaType == "image" && message.mediaUrl.isNotBlank()) {
                                         AsyncImage(model = message.mediaUrl, contentDescription = "Фото в сообщении",
-                                            modifier = Modifier.widthIn(max = 230.dp).heightIn(max = 230.dp).clip(RoundedCornerShape(12.dp)),
+                                            modifier = Modifier.widthIn(max = 230.dp).heightIn(max = 230.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable { viewingImageUrl = message.mediaUrl },
                                             contentScale = ContentScale.Crop)
                                     } else if (message.mediaType == "video" && message.mediaUrl.isNotBlank()) {
                                         Text("▶ Открыть видео", color = if (mine) Color.White else Red,
@@ -2406,6 +2482,13 @@ private fun ChatScreen(
         dismissButton = { TextButton(onClick = { showBlockConfirm = false }) { Text("Отмена", color = Muted) } },
         containerColor = Panel
     )
+
+    viewingImageUrl?.let { imageUrl ->
+        MediaImageViewer(
+            imageUrl = imageUrl,
+            onDismiss = { viewingImageUrl = null }
+        )
+    }
 
     if (pendingMediaUri != null) {
         val previewUri = pendingMediaUri
