@@ -70,6 +70,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.window.Dialog
@@ -1640,15 +1641,37 @@ private fun MediaImageViewer(imageUrl: String, onDismiss: () -> Unit) {
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize()
                     .pointerInput(imageUrl) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            val nextScale = (scale * zoom).coerceIn(1f, 5f)
+                        detectTapGestures(onDoubleTap = {
+                            if (scale > 1.01f) {
+                                scale = 1f
+                                offsetX = 0f
+                                offsetY = 0f
+                            } else {
+                                scale = 2.5f
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
+                        })
+                    }
+                    .pointerInput(imageUrl) {
+                        detectTransformGestures { centroid, pan, zoom, _ ->
+                            val previousScale = scale
+                            val nextScale = (previousScale * zoom).coerceIn(1f, 5f)
+                            val scaleFactor = nextScale / previousScale
+                            val centerX = size.width / 2f
+                            val centerY = size.height / 2f
+                            val anchoredX = offsetX + (centroid.x - centerX) * (1f - scaleFactor) + pan.x
+                            val anchoredY = offsetY + (centroid.y - centerY) * (1f - scaleFactor) + pan.y
+                            val maxOffsetX = size.width * (nextScale - 1f) / 2f
+                            val maxOffsetY = size.height * (nextScale - 1f) / 2f
+
                             scale = nextScale
                             if (nextScale <= 1f) {
                                 offsetX = 0f
                                 offsetY = 0f
                             } else {
-                                offsetX += pan.x
-                                offsetY += pan.y
+                                offsetX = anchoredX.coerceIn(-maxOffsetX, maxOffsetX)
+                                offsetY = anchoredY.coerceIn(-maxOffsetY, maxOffsetY)
                             }
                         }
                     }
@@ -1680,7 +1703,7 @@ private fun MediaImageViewer(imageUrl: String, onDismiss: () -> Unit) {
             }
 
             Text(
-                "Увеличивай двумя пальцами · перемещай увеличенное фото",
+                "Двойное касание или два пальца · перемещай увеличенное фото",
                 color = Color.White.copy(alpha = 0.78f),
                 fontSize = 12.sp,
                 modifier = Modifier.align(Alignment.BottomCenter)
