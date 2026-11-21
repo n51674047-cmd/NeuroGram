@@ -1768,7 +1768,7 @@ private fun MediaVideoViewer(videoUrl: String, onDismiss: () -> Unit) {
             AndroidView(
                 factory = { viewContext ->
                     PlayerView(viewContext).apply {
-                        player = player
+                        this.player = player
                         useController = true
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
