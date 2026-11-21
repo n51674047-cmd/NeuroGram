@@ -65,6 +65,13 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -1713,6 +1720,94 @@ private fun MediaImageViewer(imageUrl: String, onDismiss: () -> Unit) {
     }
 }
 
+
+@Composable
+private fun MediaVideoViewer(videoUrl: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var volume by remember(videoUrl) { mutableFloatStateOf(1f) }
+    var playbackError by remember(videoUrl) { mutableStateOf(false) }
+    val player = remember(videoUrl) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(Uri.parse(videoUrl)))
+            prepare()
+            playWhenReady = true
+        }
+    }
+
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                playbackError = true
+            }
+        }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Column(Modifier.fillMaxSize().background(Color.Black)) {
+            Row(
+                Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Видеоплеер", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "Закрыть",
+                    color = Color.White,
+                    modifier = Modifier.clickable(onClick = onDismiss).padding(8.dp)
+                )
+            }
+
+            AndroidView(
+                factory = { viewContext ->
+                    PlayerView(viewContext).apply {
+                        player = player
+                        useController = true
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    }
+                },
+                update = { view ->
+                    if (view.player !== player) view.player = player
+                },
+                modifier = Modifier.fillMaxWidth().weight(1f)
+            )
+
+            Row(
+                Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Громкость", color = Color.White, fontSize = 12.sp)
+                Slider(
+                    value = volume,
+                    onValueChange = { next ->
+                        volume = next
+                        player.volume = next
+                    },
+                    valueRange = 0f..1f,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                )
+                Text("${(volume * 100f).toInt()}%", color = Color.White, fontSize = 12.sp)
+            }
+
+            if (playbackError) {
+                Text(
+                    "Не удалось воспроизвести видео. Попробуй MP4 с кодеком H.264.",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatScreen(
@@ -1761,6 +1856,7 @@ private fun ChatScreen(
     var showBlockConfirm by remember { mutableStateOf(false) }
     var selectedMessage by remember { mutableStateOf<MessageItem?>(null) }
     var viewingImageUrl by remember(chatId) { mutableStateOf<String?>(null) }
+    var viewingVideoUrl by remember(chatId) { mutableStateOf<String?>(null) }
     var replyingTo by remember(chatId) { mutableStateOf<MessageItem?>(null) }
     var editingMessageId by remember(chatId) { mutableStateOf("") }
     var showForwardDialog by remember { mutableStateOf(false) }
@@ -2225,11 +2321,13 @@ private fun ChatScreen(
                                                 .clickable { viewingImageUrl = message.mediaUrl },
                                             contentScale = ContentScale.Crop)
                                     } else if (message.mediaType == "video" && message.mediaUrl.isNotBlank()) {
-                                        Text("▶ Открыть видео", color = if (mine) Color.White else Red,
+                                        Text(
+                                            "▶ Смотреть видео",
+                                            color = if (mine) Color.White else Red,
                                             modifier = Modifier.clickable {
-                                                try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(message.mediaUrl))) }
-                                                catch (_: Exception) { error = "Не удалось открыть видео" }
-                                            }.padding(vertical = 8.dp))
+                                                viewingVideoUrl = message.mediaUrl
+                                            }.padding(vertical = 8.dp)
+                                        )
                                     }
                                     if (message.text.isNotBlank()) Text(
                                         message.text + if (message.edited) "  (изменено)" else "",
@@ -2510,6 +2608,13 @@ private fun ChatScreen(
         MediaImageViewer(
             imageUrl = imageUrl,
             onDismiss = { viewingImageUrl = null }
+        )
+    }
+
+    viewingVideoUrl?.let { videoUrl ->
+        MediaVideoViewer(
+            videoUrl = videoUrl,
+            onDismiss = { viewingVideoUrl = null }
         )
     }
 
