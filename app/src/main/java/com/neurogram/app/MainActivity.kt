@@ -66,6 +66,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -1724,6 +1727,7 @@ private fun MediaImageViewer(imageUrl: String, onDismiss: () -> Unit) {
 @Composable
 private fun MediaVideoViewer(videoUrl: String, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var volume by remember(videoUrl) { mutableFloatStateOf(1f) }
     var playbackError by remember(videoUrl) { mutableStateOf(false) }
     val player = remember(videoUrl) {
@@ -1734,14 +1738,19 @@ private fun MediaVideoViewer(videoUrl: String, onDismiss: () -> Unit) {
         }
     }
 
-    DisposableEffect(player) {
+    DisposableEffect(player, lifecycleOwner) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 playbackError = true
             }
         }
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) player.pause()
+        }
         player.addListener(listener)
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
             player.removeListener(listener)
             player.release()
         }
