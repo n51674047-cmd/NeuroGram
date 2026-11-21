@@ -1744,8 +1744,22 @@ private fun MediaVideoViewer(videoUrl: String, onDismiss: () -> Unit) {
                 playbackError = true
             }
         }
+        var resumeAfterStop = false
         val lifecycleObserver = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) player.pause()
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    resumeAfterStop =
+                        player.playWhenReady && player.playbackState != Player.STATE_ENDED
+                    player.pause()
+                }
+                Lifecycle.Event.ON_START -> {
+                    if (resumeAfterStop) {
+                        resumeAfterStop = false
+                        player.play()
+                    }
+                }
+                else -> Unit
+            }
         }
         player.addListener(listener)
         lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
@@ -1784,6 +1798,9 @@ private fun MediaVideoViewer(videoUrl: String, onDismiss: () -> Unit) {
                 },
                 update = { view ->
                     if (view.player !== player) view.player = player
+                },
+                onRelease = { view ->
+                    if (view.player === player) view.player = null
                 },
                 modifier = Modifier.fillMaxWidth().weight(1f)
             )
