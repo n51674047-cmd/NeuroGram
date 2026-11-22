@@ -2061,7 +2061,6 @@ private fun ChatScreen(
             temporaryUri?.path?.let { File(it).delete() }
         }
 
-        val isVideo = mediaType == "video"
         val fallbackType = when (mediaType) {
             "video" -> "video/mp4"
             "audio" -> "audio/mp4"
