@@ -107,6 +107,23 @@ test("only chat members can upload and read chat media", async () => {
   ));
 });
 
+test("chat members can upload and listen to AAC voice messages", async () => {
+  const path = "chats/members/media/voice-note.m4a";
+  const aliceStorage = testEnv.authenticatedContext("alice").storage();
+  const bobStorage = testEnv.authenticatedContext("bob").storage();
+  const outsiderStorage = testEnv.authenticatedContext("outsider").storage();
+
+  await assertSucceeds(uploadBytes(
+    ref(aliceStorage, path),
+    new Uint8Array(4096),
+    { contentType: "audio/mp4" }
+  ));
+
+  const downloaded = await assertSucceeds(getBytes(ref(bobStorage, path)));
+  assert.equal(downloaded.byteLength, 4096);
+  await assertFails(getBytes(ref(outsiderStorage, path)));
+});
+
 test("chat members cannot upload unsupported media types", async () => {
   const aliceStorage = testEnv.authenticatedContext("alice").storage();
 
