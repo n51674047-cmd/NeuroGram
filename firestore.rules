@@ -187,7 +187,11 @@ service cloud.firestore {
           && request.resource.data.get('text', '') is string
           && request.resource.data.get('text', '').size() <= 5000
           && request.resource.data.get('mediaUrl', '') is string
-          && request.resource.data.get('mediaType', '') in ['', 'image', 'video'];
+          && request.resource.data.get('mediaType', '') in ['', 'image', 'video', 'audio']
+          && (request.resource.data.get('mediaType', '') != 'audio'
+            || (request.resource.data.get('mediaDurationMs', 0) is int
+              && request.resource.data.get('mediaDurationMs', 0) > 0
+              && request.resource.data.get('mediaDurationMs', 0) <= 120000));
         allow update: if chatExistsAndUserIsMember() && (
           (resource.data.senderId != request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys()
