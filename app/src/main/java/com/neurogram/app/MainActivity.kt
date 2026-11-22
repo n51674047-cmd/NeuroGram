@@ -1937,6 +1937,7 @@ private fun ChatScreen(
     onBack: () -> Unit, onViewProfile: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var messages by remember(chatId) { mutableStateOf<List<MessageItem>>(emptyList()) }
     var draft by remember(chatId) { mutableStateOf("") }
     var error by remember(chatId) { mutableStateOf("") }
@@ -2253,6 +2254,17 @@ private fun ChatScreen(
             voiceRecordingFile?.delete()
             pendingVoiceFile?.delete()
         }
+    }
+
+    DisposableEffect(lifecycleOwner, chatId, isRecordingVoice) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && isRecordingVoice) {
+                cancelVoiceRecording()
+                error = "Запись отменена: приложение свёрнуто."
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     DisposableEffect(otherUid, presenceHidden) {
