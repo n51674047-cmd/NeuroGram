@@ -9,6 +9,7 @@ import android.app.PendingIntent
 import android.Manifest
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
+import android.media.MediaRecorder
 import android.media.RingtoneManager
 import android.content.Intent
 import android.os.Build
@@ -18,6 +19,7 @@ import android.provider.OpenableColumns
 import android.app.Activity
 import android.content.ContextWrapper
 import android.os.Handler
+import android.os.SystemClock
 import android.os.Looper
 import android.net.Uri
 import android.graphics.Bitmap
@@ -247,6 +249,8 @@ private fun createUploadMetadata(
         "heic" -> "image/heic"
         "heif" -> "image/heif"
         "mp4" -> "video/mp4"
+        "m4a" -> "audio/mp4"
+        "aac" -> "audio/aac"
         else -> null
     }?.takeIf { it.startsWith("$expectedPrefix/") }
 
@@ -507,8 +511,14 @@ private data class MessageItem(
     val mediaType: String = "",
     val edited: Boolean = false,
     val reactions: Map<String, List<String>> = emptyMap(),
-    val forwardedFrom: String = ""
+    val forwardedFrom: String = "",
+    val mediaDurationMs: Long = 0L
 )
+
+private fun formatVoiceDuration(durationMs: Long): String {
+    val totalSeconds = durationMs.coerceAtLeast(0L) / 1000L
+    return "%d:%02d".format(java.util.Locale.getDefault(), totalSeconds / 60L, totalSeconds % 60L)
+}
 
 @Composable
 private fun NeuroGramSplash(onFinished: () -> Unit) {
@@ -1834,6 +1844,91 @@ private fun MediaVideoViewer(videoUrl: String, onDismiss: () -> Unit) {
     }
 }
 
+@Composable
+private fun VoiceMessagePlayer(audioUrl: String, durationMs: Long, mine: Boolean) {
+    val context = LocalContext.current
+    val player = remember(audioUrl) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(Uri.parse(audioUrl)))
+            prepare()
+        }
+    }
+    var isPlaying by remember(audioUrl) { mutableStateOf(false) }
+    var playbackError by remember(audioUrl) { mutableStateOf(false) }
+    var positionMs by remember(audioUrl) { mutableLongStateOf(0L) }
+    var totalDurationMs by remember(audioUrl) { mutableLongStateOf(durationMs.coerceAtLeast(1L)) }
+    var sliderValue by remember(audioUrl) { mutableFloatStateOf(0f) }
+
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlayingNow: Boolean) {
+                isPlaying = isPlayingNow
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    player.seekTo(0L)
+                    positionMs = 0L
+                    sliderValue = 0f
+                    isPlaying = false
+                }
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                playbackError = true
+                isPlaying = false
+            }
+        }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
+    }
+
+    LaunchedEffect(player) {
+        while (true) {
+            val actualDuration = player.duration
+            if (actualDuration > 0L) totalDurationMs = actualDuration
+            positionMs = player.currentPosition.coerceAtLeast(0L)
+            sliderValue = (positionMs.toFloat() / totalDurationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
+            delay(250)
+        }
+    }
+
+    Column(Modifier.widthIn(max = 250.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                onClick = {
+                    playbackError = false
+                    if (player.isPlaying) player.pause() else player.play()
+                },
+                contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp)
+            ) {
+                Text(if (isPlaying) "Ⅱ" else "▶", color = if (mine) Color.White else Red, fontSize = 19.sp)
+            }
+            Column(Modifier.weight(1f)) {
+                Slider(
+                    value = sliderValue,
+                    onValueChange = { sliderValue = it },
+                    onValueChangeFinished = { player.seekTo((sliderValue * totalDurationMs).toLong()) },
+                    modifier = Modifier.height(30.dp),
+                    colors = SliderDefaults.colors(
+                        thumbColor = if (mine) Color.White else Red,
+                        activeTrackColor = if (mine) Color.White else Red
+                    )
+                )
+                Text(
+                    "${formatVoiceDuration(positionMs)} / ${formatVoiceDuration(totalDurationMs)}",
+                    color = if (mine) Color.White.copy(alpha = 0.82f) else Muted,
+                    fontSize = 10.sp
+                )
+            }
+        }
+        if (playbackError) {
+            Text("Не удалось воспроизвести голосовое сообщение", color = if (mine) Color.White else Red, fontSize = 10.sp)
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatScreen(
@@ -1903,6 +1998,13 @@ private fun ChatScreen(
     var pendingMediaName by remember(chatId) { mutableStateOf("") }
     var pendingMediaSize by remember(chatId) { mutableStateOf<Long?>(null) }
     var uploadCancelRequested by remember(chatId) { mutableStateOf(false) }
+    var isRecordingVoice by remember(chatId) { mutableStateOf(false) }
+    var voiceRecorder by remember(chatId) { mutableStateOf<MediaRecorder?>(null) }
+    var voiceRecordingFile by remember(chatId) { mutableStateOf<File?>(null) }
+    var voiceRecordingStartedAt by remember(chatId) { mutableLongStateOf(0L) }
+    var recordingElapsedMs by remember(chatId) { mutableLongStateOf(0L) }
+    var pendingVoiceFile by remember(chatId) { mutableStateOf<File?>(null) }
+    var pendingVoiceDurationMs by remember(chatId) { mutableLongStateOf(0L) }
     fun prepareMediaPreview(uri: Uri, mediaType: String) {
         val details = readLocalMediaDetails(context, uri)
         pendingMediaUri = uri
@@ -1911,20 +2013,30 @@ private fun ChatScreen(
         pendingMediaSize = details.sizeBytes
     }
 
-    fun sendMessageContent(text: String, mediaUrl: String = "", mediaType: String = ""): com.google.android.gms.tasks.Task<Void> {
+    fun sendMessageContent(text: String, mediaUrl: String = "", mediaType: String = "", mediaDurationMs: Long = 0L): com.google.android.gms.tasks.Task<Void> {
         val chatRef = db.collection("chats").document(chatId)
         val messageRef = chatRef.collection("messages").document()
         val reply = replyingTo
-        val preview = when {
-            mediaType == "image" -> "📷 Фото"
-            mediaType == "video" -> "▶ Видео"
+        val preview = when (mediaType) {
+            "image" -> "📷 Фото"
+            "video" -> "▶ Видео"
+            "audio" -> "🎙 Голосовое сообщение"
             else -> text
         }
         val batch = db.batch()
         batch.set(messageRef, mapOf(
             "senderId" to myUid, "senderName" to myName,
             "text" to text, "mediaUrl" to mediaUrl, "mediaType" to mediaType,
-            "replyToId" to (reply?.id ?: ""), "replyToText" to (reply?.text?.takeIf { it.isNotBlank() } ?: reply?.let { if (it.mediaType == "image") "Фото" else if (it.mediaType == "video") "Видео" else "" } ?: ""),
+            "mediaDurationMs" to mediaDurationMs,
+            "replyToId" to (reply?.id ?: ""),
+            "replyToText" to (reply?.text?.takeIf { it.isNotBlank() } ?: reply?.let {
+                when (it.mediaType) {
+                    "image" -> "Фото"
+                    "video" -> "Видео"
+                    "audio" -> "Голосовое сообщение"
+                    else -> ""
+                }
+            } ?: ""),
             "createdAt" to FieldValue.serverTimestamp(),
             "clientCreatedAt" to com.google.firebase.Timestamp.now(),
             "deliveredAt" to null, "readAt" to null,
@@ -1942,14 +2054,19 @@ private fun ChatScreen(
         uri: Uri,
         mediaType: String,
         temporaryUri: Uri? = null,
-        statusLabel: String? = null
+        statusLabel: String? = null,
+        audioDurationMs: Long = 0L
     ) {
         fun cleanupTemporaryFile() {
             temporaryUri?.path?.let { File(it).delete() }
         }
 
         val isVideo = mediaType == "video"
-        val fallbackType = if (isVideo) "video/mp4" else "image/jpeg"
+        val fallbackType = when (mediaType) {
+            "video" -> "video/mp4"
+            "audio" -> "audio/mp4"
+            else -> "image/jpeg"
+        }
         val imageExtension = when (context.contentResolver.getType(uri)?.lowercase()) {
             "image/png" -> "png"
             "image/webp" -> "webp"
@@ -1963,15 +2080,19 @@ private fun ChatScreen(
                 else -> "jpg"
             }
         }
-        val fileName = if (isVideo) {
-            "video_${System.currentTimeMillis()}.mp4"
-        } else {
-            "image_${System.currentTimeMillis()}.$imageExtension"
+        val fileName = when (mediaType) {
+            "video" -> "video_${System.currentTimeMillis()}.mp4"
+            "audio" -> "voice_${System.currentTimeMillis()}.m4a"
+            else -> "image_${System.currentTimeMillis()}.$imageExtension"
         }
         val ref = storage.reference.child("chats/$chatId/media/$fileName")
         uploadingMedia = true
         uploadProgress = 0f
-        uploadStatus = statusLabel ?: if (isVideo) "Загрузка видео" else "Загрузка фото"
+        uploadStatus = statusLabel ?: when (mediaType) {
+            "video" -> "Загрузка видео"
+            "audio" -> "Загрузка голосового сообщения"
+            else -> "Загрузка фото"
+        }
         uploadCancelRequested = false
         error = ""
 
@@ -1996,7 +2117,7 @@ private fun ChatScreen(
             uploadProgress = 1f
             uploadStatus = "Подготовка сообщения…"
             ref.downloadUrl.addOnSuccessListener { downloadUrl ->
-                sendMessageContent("", downloadUrl.toString(), mediaType)
+                sendMessageContent("", downloadUrl.toString(), mediaType, audioDurationMs)
                     .addOnSuccessListener {
                         cleanupTemporaryFile()
                         uploadingMedia = false
@@ -2031,9 +2152,82 @@ private fun ChatScreen(
             error = if (wasCancelled) {
                 "Загрузка отменена"
             } else {
-                "Не удалось загрузить ${if (isVideo) "видео" else "фото"}: ${exception.localizedMessage}"
+                "Не удалось загрузить ${when (mediaType) { "video" -> "видео"; "audio" -> "голосовое сообщение"; else -> "фото" }}: ${exception.localizedMessage}"
             }
         }
+    }
+
+    fun stopVoiceRecording() {
+        val recorder = voiceRecorder ?: return
+        val file = voiceRecordingFile
+        val elapsed = (SystemClock.elapsedRealtime() - voiceRecordingStartedAt).coerceAtLeast(0L)
+        voiceRecorder = null
+        voiceRecordingFile = null
+        isRecordingVoice = false
+        val stopResult = runCatching { recorder.stop() }
+        runCatching { recorder.reset() }
+        runCatching { recorder.release() }
+
+        if (stopResult.isFailure || file == null || !file.exists() || file.length() < 1024L || elapsed < 500L) {
+            file?.delete()
+            error = "Запись не получилась. Попробуй записать сообщение ещё раз."
+            return
+        }
+        pendingVoiceFile = file
+        pendingVoiceDurationMs = elapsed.coerceAtMost(120_000L)
+    }
+
+    fun cancelVoiceRecording() {
+        val recorder = voiceRecorder
+        voiceRecorder = null
+        val file = voiceRecordingFile
+        voiceRecordingFile = null
+        isRecordingVoice = false
+        if (recorder != null) {
+            runCatching { recorder.stop() }
+            runCatching { recorder.reset() }
+            runCatching { recorder.release() }
+        }
+        file?.delete()
+        recordingElapsedMs = 0L
+    }
+
+    fun startVoiceRecording() {
+        if (uploadingMedia || isRecordingVoice || pendingVoiceFile != null || pendingMediaUri != null) return
+        val file = File(context.cacheDir, "voice_${chatId}_${System.currentTimeMillis()}.m4a")
+        val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(context) else MediaRecorder()
+        try {
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            recorder.setAudioEncodingBitRate(64_000)
+            recorder.setAudioSamplingRate(44_100)
+            recorder.setMaxDuration(120_000)
+            recorder.setOutputFile(file.absolutePath)
+            recorder.setOnInfoListener { _, what, _ ->
+                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) stopVoiceRecording()
+            }
+            recorder.prepare()
+            recorder.start()
+            voiceRecorder = recorder
+            voiceRecordingFile = file
+            voiceRecordingStartedAt = SystemClock.elapsedRealtime()
+            recordingElapsedMs = 0L
+            isRecordingVoice = true
+            error = ""
+        } catch (exception: Exception) {
+            runCatching { recorder.reset() }
+            runCatching { recorder.release() }
+            file.delete()
+            error = "Не удалось начать запись: ${exception.localizedMessage}"
+        }
+    }
+
+    val voicePermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startVoiceRecording()
+        else error = "Для записи голосовых сообщений нужен доступ к микрофону."
     }
 
     val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -2043,6 +2237,24 @@ private fun ChatScreen(
         if (uri != null) prepareMediaPreview(uri, "video")
     }
 
+    LaunchedEffect(isRecordingVoice, voiceRecordingStartedAt) {
+        while (isRecordingVoice) {
+            recordingElapsedMs = (SystemClock.elapsedRealtime() - voiceRecordingStartedAt).coerceAtLeast(0L)
+            delay(250)
+        }
+        recordingElapsedMs = 0L
+    }
+
+    DisposableEffect(chatId) {
+        onDispose {
+            voiceRecorder?.let { recorder ->
+                runCatching { recorder.stop() }
+                runCatching { recorder.release() }
+            }
+            voiceRecordingFile?.delete()
+            pendingVoiceFile?.delete()
+        }
+    }
 
     DisposableEffect(otherUid, presenceHidden) {
         if (otherUid.isBlank()) {
@@ -2112,7 +2324,7 @@ private fun ChatScreen(
                             val users = (value as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
                             key?.toString()?.let { it to users }
                         }.toMap()
-                        MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "", doc.getTimestamp("deliveredAt") != null, doc.getTimestamp("readAt") != null, doc.metadata.hasPendingWrites(), doc.getTimestamp("createdAt") ?: doc.getTimestamp("clientCreatedAt"), doc.getString("replyToId") ?: "", doc.getString("replyToText") ?: "", doc.getString("mediaUrl") ?: "", doc.getString("mediaType") ?: "", doc.getBoolean("edited") == true, reactions, doc.getString("forwardedFrom") ?: "")
+                        MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "", doc.getTimestamp("deliveredAt") != null, doc.getTimestamp("readAt") != null, doc.metadata.hasPendingWrites(), doc.getTimestamp("createdAt") ?: doc.getTimestamp("clientCreatedAt"), doc.getString("replyToId") ?: "", doc.getString("replyToText") ?: "", doc.getString("mediaUrl") ?: "", doc.getString("mediaType") ?: "", doc.getBoolean("edited") == true, reactions, doc.getString("forwardedFrom") ?: "", doc.getLong("mediaDurationMs") ?: 0L)
                     }
                     val batch = db.batch()
                     var changed = false
@@ -2354,6 +2566,8 @@ private fun ChatScreen(
                                                 viewingVideoUrl = message.mediaUrl
                                             }.padding(vertical = 8.dp)
                                         )
+                                    } else if (message.mediaType == "audio" && message.mediaUrl.isNotBlank()) {
+                                        VoiceMessagePlayer(message.mediaUrl, message.mediaDurationMs, mine)
                                     }
                                     if (message.text.isNotBlank()) Text(
                                         message.text + if (message.edited) "  (изменено)" else "",
@@ -2421,8 +2635,27 @@ private fun ChatScreen(
                 .glassSurface(RoundedCornerShape(24.dp)).padding(5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("▧", color = Red, fontSize = 21.sp, modifier = Modifier.clickable(enabled = !uploadingMedia) { imagePicker.launch("image/*") }.padding(horizontal = 7.dp))
-            Text("▶", color = Red, fontSize = 17.sp, modifier = Modifier.clickable(enabled = !uploadingMedia) { videoPicker.launch("video/*") }.padding(horizontal = 5.dp))
+            val mediaActionsEnabled = !uploadingMedia && !isRecordingVoice && pendingVoiceFile == null
+            Text("▧", color = Red, fontSize = 21.sp, modifier = Modifier.clickable(enabled = mediaActionsEnabled) { imagePicker.launch("image/*") }.padding(horizontal = 7.dp))
+            Text("▶", color = Red, fontSize = 17.sp, modifier = Modifier.clickable(enabled = mediaActionsEnabled) { videoPicker.launch("video/*") }.padding(horizontal = 5.dp))
+            if (isRecordingVoice) {
+                Text("● ${formatVoiceDuration(recordingElapsedMs)}", color = Red, fontSize = 12.sp)
+                TextButton(onClick = { stopVoiceRecording() }) { Text("Готово", color = Red) }
+                TextButton(onClick = { cancelVoiceRecording() }) { Text("×", color = Muted) }
+            } else {
+                Text(
+                    "🎙",
+                    color = Red,
+                    fontSize = 19.sp,
+                    modifier = Modifier.clickable(enabled = mediaActionsEnabled && pendingMediaUri == null) {
+                        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                            startVoiceRecording()
+                        } else {
+                            voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    }.padding(horizontal = 5.dp)
+                )
+            }
             OutlinedTextField(
                 value = draft, onValueChange = { draft = it },
                 modifier = Modifier.weight(1f), placeholder = { Text(if (editingMessageId.isNotBlank()) "Изменить сообщение…" else "Сообщение…", color = Muted) },
@@ -2447,7 +2680,7 @@ private fun ChatScreen(
                         sendMessageContent(text)
                     }
                 },
-                enabled = (draft.isNotBlank() || editingMessageId.isNotBlank()) && !isBlockedByMe && !isBlockedByOther && !uploadingMedia,
+                enabled = (draft.isNotBlank() || editingMessageId.isNotBlank()) && !isBlockedByMe && !isBlockedByOther && !uploadingMedia && !isRecordingVoice && pendingVoiceFile == null,
                 colors = ButtonDefaults.buttonColors(containerColor = Red),
                 shape = CircleShape, contentPadding = PaddingValues(14.dp)
             ) { Text(if (editingMessageId.isNotBlank()) "✓" else if (uploadingMedia) "…" else "➤", color = Color.White) }
@@ -2485,7 +2718,14 @@ private fun ChatScreen(
                     TextButton(onClick = {
                         db.collection("chats").document(chatId).update(
                             mapOf("pinnedMessageId" to message.id,
-                                "pinnedMessageText" to (message.text.ifBlank { if (message.mediaType == "image") "Фото" else "Видео" }))
+                                "pinnedMessageText" to (message.text.ifBlank {
+                                    when (message.mediaType) {
+                                        "image" -> "Фото"
+                                        "video" -> "Видео"
+                                        "audio" -> "Голосовое сообщение"
+                                        else -> ""
+                                    }
+                                }))
                         )
                         selectedMessage = null
                     }) { Text("📌 Закрепить", color = Red) }
@@ -2525,10 +2765,18 @@ private fun ChatScreen(
                         val source = forwardingMessage!!
                         val ref = db.collection("chats").document(target.id)
                         val messageRef = ref.collection("messages").document()
-                        val preview = source.text.ifBlank { if (source.mediaType == "image") "📷 Фото" else "▶ Видео" }
+                        val preview = source.text.ifBlank {
+                            when (source.mediaType) {
+                                "image" -> "📷 Фото"
+                                "video" -> "▶ Видео"
+                                "audio" -> "🎙 Голосовое сообщение"
+                                else -> ""
+                            }
+                        }
                         messageRef.set(mapOf(
                             "senderId" to myUid, "senderName" to myName, "text" to source.text,
                             "mediaUrl" to source.mediaUrl, "mediaType" to source.mediaType,
+                            "mediaDurationMs" to source.mediaDurationMs,
                             "forwardedFrom" to source.senderName,
                             "createdAt" to FieldValue.serverTimestamp(),
                             "clientCreatedAt" to com.google.firebase.Timestamp.now(),
@@ -2641,6 +2889,50 @@ private fun ChatScreen(
         MediaVideoViewer(
             videoUrl = videoUrl,
             onDismiss = { viewingVideoUrl = null }
+        )
+    }
+
+    pendingVoiceFile?.let { voiceFile ->
+        AlertDialog(
+            onDismissRequest = {
+                voiceFile.delete()
+                pendingVoiceFile = null
+                pendingVoiceDurationMs = 0L
+            },
+            title = { Text("Голосовое сообщение", color = Ink) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    VoiceMessagePlayer(Uri.fromFile(voiceFile).toString(), pendingVoiceDurationMs, true)
+                    Text("Длительность: ${formatVoiceDuration(pendingVoiceDurationMs)}", color = Muted, fontSize = 12.sp)
+                    Text("Прослушай запись перед отправкой.", color = Muted, fontSize = 11.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val file = pendingVoiceFile
+                    val duration = pendingVoiceDurationMs
+                    pendingVoiceFile = null
+                    pendingVoiceDurationMs = 0L
+                    if (file != null) {
+                        val uri = Uri.fromFile(file)
+                        uploadChatMedia(
+                            uri = uri,
+                            mediaType = "audio",
+                            temporaryUri = uri,
+                            statusLabel = "Голосовое · ${formatVoiceDuration(duration)}",
+                            audioDurationMs = duration
+                        )
+                    }
+                }) { Text("Отправить", color = Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    voiceFile.delete()
+                    pendingVoiceFile = null
+                    pendingVoiceDurationMs = 0L
+                }) { Text("Удалить", color = Muted) }
+            },
+            containerColor = Panel
         )
     }
 
