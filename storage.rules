@@ -21,9 +21,13 @@ service firebase.storage {
     match /chats/{chatId}/media/{fileName} {
       allow read: if isChatMember(chatId);
       allow write: if resource == null && isChatMember(chatId)
-        && request.resource.size < 50 * 1024 * 1024
-        && (request.resource.contentType.matches('image/.*')
-          || request.resource.contentType.matches('video/.*'));
+        && (
+          (request.resource.size < 50 * 1024 * 1024
+            && (request.resource.contentType.matches('image/.*')
+              || request.resource.contentType.matches('video/.*')))
+          || (request.resource.size < 20 * 1024 * 1024
+            && request.resource.contentType.matches('audio/.*'))
+        );
     }
   }
 }
