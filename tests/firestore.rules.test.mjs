@@ -164,6 +164,47 @@ test("a member can create a message as themselves", async () => {
   }));
 });
 
+test("a group member can create a voice message with a valid duration", async () => {
+  const db = testEnv.authenticatedContext("bob").firestore();
+
+  await assertSucceeds(setDoc(doc(db, "chats", "group", "messages", "bob-voice"), {
+    senderId: "bob",
+    senderName: "Bob",
+    text: "",
+    mediaUrl: "https://example.invalid/voice.m4a",
+    mediaType: "audio",
+    mediaDurationMs: 12500,
+    createdAt: Timestamp.now(),
+    deliveredAt: null,
+    readAt: null,
+    edited: false
+  }));
+});
+
+test("voice messages without a valid duration are rejected", async () => {
+  const db = testEnv.authenticatedContext("bob").firestore();
+  const base = {
+    senderId: "bob",
+    senderName: "Bob",
+    text: "",
+    mediaUrl: "https://example.invalid/voice.m4a",
+    mediaType: "audio",
+    createdAt: Timestamp.now(),
+    deliveredAt: null,
+    readAt: null,
+    edited: false
+  };
+
+  await assertFails(setDoc(doc(db, "chats", "group", "messages", "voice-no-duration"), {
+    ...base,
+    mediaDurationMs: 0
+  }));
+  await assertFails(setDoc(doc(db, "chats", "group", "messages", "voice-too-long"), {
+    ...base,
+    mediaDurationMs: 120001
+  }));
+});
+
 test("a non-member cannot create a message", async () => {
   const db = testEnv.authenticatedContext("outsider").firestore();
 
