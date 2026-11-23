@@ -493,8 +493,23 @@ private data class ChatItem(
     val isBlocked: Boolean = false,
     val isGroup: Boolean = false,
     val memberCount: Int = 2,
-    val avatarUrl: String = ""
+    val avatarUrl: String = "",
+    val lastActivityAt: com.google.firebase.Timestamp? = null
 )
+
+private fun formatChatTimestamp(timestamp: com.google.firebase.Timestamp?): String {
+    val date = timestamp?.toDate() ?: return ""
+    val now = java.util.Calendar.getInstance()
+    val messageDate = java.util.Calendar.getInstance().apply { time = date }
+    return when {
+        now.get(java.util.Calendar.YEAR) == messageDate.get(java.util.Calendar.YEAR)
+            && now.get(java.util.Calendar.DAY_OF_YEAR) == messageDate.get(java.util.Calendar.DAY_OF_YEAR) ->
+            java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(date)
+        now.get(java.util.Calendar.YEAR) == messageDate.get(java.util.Calendar.YEAR) ->
+            java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()).format(date)
+        else -> java.text.SimpleDateFormat("dd.MM.yy", java.util.Locale.getDefault()).format(date)
+    }
+}
 
 private data class MessageItem(
     val id: String,
@@ -811,8 +826,9 @@ private fun NeuroGramApp(openChatId: String?, onNotificationHandled: () -> Unit)
                             val blockedBy = doc.get("blockedBy") as? List<*> ?: emptyList<Any>()
                             ChatItem(doc.id, title, doc.getString("lastMessage") ?: "Нет сообщений",
                                 if (isGroup) "" else otherId ?: "", mutedFor.contains(uid), blockedBy.contains(uid),
-                                isGroup, members.size, doc.getString("avatarUrl") ?: "")
-                        }?.sortedByDescending { it.id } ?: emptyList()
+                                isGroup, members.size, doc.getString("avatarUrl") ?: "",
+                                doc.getTimestamp("updatedAt") ?: doc.getTimestamp("createdAt"))
+                        }?.sortedByDescending { it.lastActivityAt?.toDate()?.time ?: 0L } ?: emptyList()
                         chatsLoadedForUid = uid
                     }
                 }
@@ -1602,6 +1618,9 @@ private fun ChatList(
                                     modifier = Modifier.padding(top = 4.dp), maxLines = 1)
                             }
                             Column(horizontalAlignment = Alignment.End) {
+                                if (chat.lastActivityAt != null) {
+                                    Text(formatChatTimestamp(chat.lastActivityAt), color = Muted, fontSize = 10.sp)
+                                }
                                 if (chat.isMuted) Text("🔕", fontSize = 12.sp)
                                 if (chat.isBlocked) Text("Заблокирован", color = Color(0xFFE05260), fontSize = 9.sp)
                                 Text("›", color = Muted, fontSize = 22.sp)
