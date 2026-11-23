@@ -1844,9 +1844,40 @@ private fun MediaVideoViewer(videoUrl: String, onDismiss: () -> Unit) {
     }
 }
 
+// All voice-message cards share one playback slot. Starting a new message
+// pauses the previous one; leaving the screen or backgrounding the app stops audio.
+private object VoicePlaybackCoordinator {
+    private var activePlayer: ExoPlayer? = null
+
+    @Synchronized
+    fun play(player: ExoPlayer) {
+        if (activePlayer !== player) activePlayer?.pause()
+        activePlayer = player
+        player.play()
+    }
+
+    @Synchronized
+    fun pause(player: ExoPlayer) {
+        player.pause()
+        if (activePlayer === player) activePlayer = null
+    }
+
+    @Synchronized
+    fun clear(player: ExoPlayer) {
+        if (activePlayer === player) activePlayer = null
+    }
+
+    @Synchronized
+    fun release(player: ExoPlayer) {
+        if (activePlayer === player) activePlayer = null
+        player.release()
+    }
+}
+
 @Composable
 private fun VoiceMessagePlayer(audioUrl: String, durationMs: Long, mine: Boolean) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val player = remember(audioUrl) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(Uri.parse(audioUrl)))
@@ -1859,7 +1890,7 @@ private fun VoiceMessagePlayer(audioUrl: String, durationMs: Long, mine: Boolean
     var totalDurationMs by remember(audioUrl) { mutableLongStateOf(durationMs.coerceAtLeast(1L)) }
     var sliderValue by remember(audioUrl) { mutableFloatStateOf(0f) }
 
-    DisposableEffect(player) {
+    DisposableEffect(player, lifecycleOwner) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlayingNow: Boolean) {
                 isPlaying = isPlayingNow
@@ -1870,17 +1901,27 @@ private fun VoiceMessagePlayer(audioUrl: String, durationMs: Long, mine: Boolean
                     positionMs = 0L
                     sliderValue = 0f
                     isPlaying = false
+                    VoicePlaybackCoordinator.clear(player)
                 }
             }
             override fun onPlayerError(error: PlaybackException) {
                 playbackError = true
                 isPlaying = false
+                VoicePlaybackCoordinator.clear(player)
+            }
+        }
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                // Do not resume automatically when the app returns to foreground.
+                VoicePlaybackCoordinator.pause(player)
             }
         }
         player.addListener(listener)
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
             player.removeListener(listener)
-            player.release()
+            VoicePlaybackCoordinator.release(player)
         }
     }
 
@@ -1899,7 +1940,11 @@ private fun VoiceMessagePlayer(audioUrl: String, durationMs: Long, mine: Boolean
             TextButton(
                 onClick = {
                     playbackError = false
-                    if (player.isPlaying) player.pause() else player.play()
+                    if (player.isPlaying) {
+                        VoicePlaybackCoordinator.pause(player)
+                    } else {
+                        VoicePlaybackCoordinator.play(player)
+                    }
                 },
                 contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp)
             ) {
