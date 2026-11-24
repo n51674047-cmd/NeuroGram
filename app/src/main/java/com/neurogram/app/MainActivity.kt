@@ -10,6 +10,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.MediaRecorder
+import android.media.audiofx.Visualizer
 import android.media.RingtoneManager
 import android.content.Intent
 import android.os.Build
@@ -1893,6 +1894,22 @@ private object VoicePlaybackCoordinator {
     }
 }
 
+private fun waveformBarsFromPcm(samples: ByteArray, barCount: Int = 36): List<Float> {
+    if (samples.isEmpty()) return List(barCount) { 0.18f }
+    return List(barCount) { index ->
+        val start = index * samples.size / barCount
+        val end = ((index + 1) * samples.size / barCount)
+            .coerceAtLeast(start + 1)
+            .coerceAtMost(samples.size)
+        var peak = 0
+        for (sampleIndex in start until end) {
+            val sample = samples[sampleIndex].toInt() and 0xFF
+            peak = maxOf(peak, kotlin.math.abs(sample - 128))
+        }
+        (peak / 128f).coerceIn(0.08f, 1f)
+    }
+}
+
 @Composable
 private fun VoiceMessagePlayer(audioUrl: String, durationMs: Long, mine: Boolean) {
     val context = LocalContext.current
@@ -1908,6 +1925,7 @@ private fun VoiceMessagePlayer(audioUrl: String, durationMs: Long, mine: Boolean
     var positionMs by remember(audioUrl) { mutableLongStateOf(0L) }
     var totalDurationMs by remember(audioUrl) { mutableLongStateOf(durationMs.coerceAtLeast(1L)) }
     var sliderValue by remember(audioUrl) { mutableFloatStateOf(0f) }
+    var waveformBars by remember(audioUrl) { mutableStateOf(List(36) { 0.18f }) }
 
     DisposableEffect(player, lifecycleOwner) {
         val listener = object : Player.Listener {
@@ -1944,6 +1962,65 @@ private fun VoiceMessagePlayer(audioUrl: String, durationMs: Long, mine: Boolean
         }
     }
 
+    DisposableEffect(player, isPlaying) {
+        var visualizer: Visualizer? = null
+        val disposed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        // Visualizer requires the microphone permission. Playback and seeking remain
+        // available without it; in that case the neutral bars stay as a fallback.
+        if (
+            isPlaying &&
+            context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED &&
+            player.audioSessionId > 0
+        ) {
+            var created: Visualizer? = null
+            try {
+                created = Visualizer(player.audioSessionId)
+                val captureRange = Visualizer.getCaptureSizeRange()
+                check(captureRange.size >= 2)
+                check(created.setCaptureSize(captureRange[1]) == Visualizer.SUCCESS)
+
+                val listenerResult = created.setDataCaptureListener(
+                    object : Visualizer.OnDataCaptureListener {
+                        override fun onWaveFormDataCapture(
+                            effect: Visualizer,
+                            waveform: ByteArray,
+                            samplingRate: Int
+                        ) {
+                            val bars = waveformBarsFromPcm(waveform)
+                            mainHandler.post {
+                                if (!disposed.get()) waveformBars = bars
+                            }
+                        }
+
+                        override fun onFftDataCapture(
+                            effect: Visualizer,
+                            fft: ByteArray,
+                            samplingRate: Int
+                        ) = Unit
+                    },
+                    (Visualizer.getMaxCaptureRate() / 2).coerceAtLeast(1),
+                    true,
+                    false
+                )
+                check(listenerResult == Visualizer.SUCCESS)
+                check(created.setEnabled(true) == Visualizer.SUCCESS)
+                visualizer = created
+            } catch (_: Exception) {
+                runCatching { created?.release() }
+            }
+        }
+
+        onDispose {
+            disposed.set(true)
+            visualizer?.let { effect ->
+                runCatching { effect.setEnabled(false) }
+                runCatching { effect.release() }
+            }
+        }
+    }
+
     LaunchedEffect(player) {
         while (true) {
             val actualDuration = player.duration
@@ -1953,6 +2030,9 @@ private fun VoiceMessagePlayer(audioUrl: String, durationMs: Long, mine: Boolean
             delay(250)
         }
     }
+
+    val playedWaveColor = if (mine) Color.White else Red
+    val pendingWaveColor = if (mine) Color.White.copy(alpha = 0.32f) else Muted.copy(alpha = 0.48f)
 
     Column(Modifier.widthIn(max = 250.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1970,16 +2050,34 @@ private fun VoiceMessagePlayer(audioUrl: String, durationMs: Long, mine: Boolean
                 Text(if (isPlaying) "Ⅱ" else "▶", color = if (mine) Color.White else Red, fontSize = 19.sp)
             }
             Column(Modifier.weight(1f)) {
-                Slider(
-                    value = sliderValue,
-                    onValueChange = { sliderValue = it },
-                    onValueChangeFinished = { player.seekTo((sliderValue * totalDurationMs).toLong()) },
-                    modifier = Modifier.height(30.dp),
-                    colors = SliderDefaults.colors(
-                        thumbColor = if (mine) Color.White else Red,
-                        activeTrackColor = if (mine) Color.White else Red
-                    )
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .pointerInput(totalDurationMs) {
+                            detectTapGestures { offset ->
+                                val fraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                val targetPosition = (fraction * totalDurationMs).toLong()
+                                player.seekTo(targetPosition)
+                                positionMs = targetPosition
+                                sliderValue = fraction
+                            }
+                        },
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    waveformBars.forEachIndexed { index, amplitude ->
+                        val alreadyPlayed = index.toFloat() / waveformBars.size <= sliderValue
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .height((4f + amplitude.coerceIn(0.08f, 1f) * 24f).dp)
+                                .clip(CircleShape)
+                                .background(if (alreadyPlayed) playedWaveColor else pendingWaveColor)
+                        )
+                    }
+                }
                 Text(
                     "${formatVoiceDuration(positionMs)} / ${formatVoiceDuration(totalDurationMs)}",
                     color = if (mine) Color.White.copy(alpha = 0.82f) else Muted,
