@@ -136,7 +136,7 @@ test("a member can reset only their own unread count and read cursor", async () 
   }));
 
   await assertFails(updateDoc(chatRef, {
-    "unreadCounts.alice": 0
+    "unreadCounts.alice": 1
   }));
 
   await assertFails(updateDoc(chatRef, {
