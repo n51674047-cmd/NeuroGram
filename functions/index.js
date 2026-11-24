@@ -3,9 +3,50 @@ const { setGlobalOptions } = require("firebase-functions/v2");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const { incrementUnreadCounts } = require("./unread-counts");
 
 initializeApp();
 setGlobalOptions({ region: "europe-west1", maxInstances: 10 });
+
+exports.updateUnreadCounts = onDocumentCreated(
+  { document: "chats/{chatId}/messages/{messageId}", retry: true },
+  async (event) => {
+    const message = event.data?.data();
+    if (!message || typeof message.senderId !== "string") return;
+    const text = typeof message.text === "string" ? message.text.trim() : "";
+    const mediaType = typeof message.mediaType === "string" ? message.mediaType : "";
+    if (!text && !mediaType) return;
+
+    const db = getFirestore();
+    const chatRef = db.collection("chats").doc(event.params.chatId);
+    const messageRef = event.data.ref;
+
+    await db.runTransaction(async (transaction) => {
+      const [messageSnap, chatSnap] = await Promise.all([
+        transaction.get(messageRef),
+        transaction.get(chatRef)
+      ]);
+      if (!messageSnap.exists || !chatSnap.exists || messageSnap.get("unreadCounted") === true) return;
+
+      const currentMessage = messageSnap.data() || {};
+      const chat = chatSnap.data() || {};
+      const eventTime = event.time ? Date.parse(event.time) : NaN;
+      const messageCreatedAt = Number.isFinite(eventTime)
+        ? new Date(eventTime)
+        : currentMessage.createdAt || currentMessage.clientCreatedAt;
+      const unreadCounts = incrementUnreadCounts({
+        members: Array.isArray(chat.members) ? chat.members : [],
+        senderId: currentMessage.senderId,
+        unreadCounts: chat.unreadCounts,
+        lastReadAt: chat.lastReadAt,
+        messageCreatedAt
+      });
+
+      transaction.update(chatRef, { unreadCounts });
+      transaction.update(messageRef, { unreadCounted: true });
+    });
+  }
+);
 
 exports.sendNewMessagePush = onDocumentCreated(
   "chats/{chatId}/messages/{messageId}",

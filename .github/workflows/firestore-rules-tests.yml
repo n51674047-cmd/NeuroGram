@@ -9,6 +9,7 @@ on:
       - "firebase.json"
       - "package.json"
       - "tests/**"
+      - "functions/**"
       - ".github/workflows/firestore-rules-tests.yml"
   workflow_dispatch:
 
@@ -38,3 +39,6 @@ jobs:
 
       - name: Run Firestore and Storage Rules tests
         run: npm run test:firebase-rules
+
+      - name: Run Cloud Functions unit tests
+        run: npm --prefix functions test

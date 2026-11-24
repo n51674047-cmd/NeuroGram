@@ -2,9 +2,14 @@
   "name": "neurogram-functions",
   "description": "NeuroGram Firebase Cloud Functions",
   "private": true,
-  "engines": { "node": "20" },
+  "engines": {
+    "node": "20"
+  },
   "main": "index.js",
-  "scripts": { "deploy": "firebase deploy --only functions" },
+  "scripts": {
+    "deploy": "firebase deploy --only functions",
+    "test": "node --test"
+  },
   "dependencies": {
     "firebase-admin": "^13.0.2",
     "firebase-functions": "^6.3.2"

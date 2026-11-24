@@ -495,7 +495,8 @@ private data class ChatItem(
     val isGroup: Boolean = false,
     val memberCount: Int = 2,
     val avatarUrl: String = "",
-    val lastActivityAt: com.google.firebase.Timestamp? = null
+    val lastActivityAt: com.google.firebase.Timestamp? = null,
+    val unreadCount: Int = 0
 )
 
 private fun formatChatTimestamp(timestamp: com.google.firebase.Timestamp?): String {
@@ -825,10 +826,12 @@ private fun NeuroGramApp(openChatId: String?, onNotificationHandled: () -> Unit)
                             if (hiddenFor.contains(uid)) return@mapNotNull null
                             val mutedFor = doc.get("mutedFor") as? List<*> ?: emptyList<Any>()
                             val blockedBy = doc.get("blockedBy") as? List<*> ?: emptyList<Any>()
+                            val unreadCounts = doc.get("unreadCounts") as? Map<*, *> ?: emptyMap<Any, Any>()
+                            val unreadCount = (unreadCounts[uid] as? Number)?.toInt()?.coerceIn(0, 999999) ?: 0
                             ChatItem(doc.id, title, doc.getString("lastMessage") ?: "Нет сообщений",
                                 if (isGroup) "" else otherId ?: "", mutedFor.contains(uid), blockedBy.contains(uid),
                                 isGroup, members.size, doc.getString("avatarUrl") ?: "",
-                                doc.getTimestamp("updatedAt") ?: doc.getTimestamp("createdAt"))
+                                doc.getTimestamp("updatedAt") ?: doc.getTimestamp("createdAt"), unreadCount)
                         }?.sortedByDescending { it.lastActivityAt?.toDate()?.time ?: 0L } ?: emptyList()
                         chatsLoadedForUid = uid
                     }
@@ -1618,13 +1621,26 @@ private fun ChatList(
                                 Text((if (chat.isGroup) "${chat.memberCount} участников · " else "") + chat.lastMessage.ifBlank { "Начните переписку" }, color = Muted, fontSize = 12.sp,
                                     modifier = Modifier.padding(top = 4.dp), maxLines = 1)
                             }
-                            Column(horizontalAlignment = Alignment.End) {
+                            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 if (chat.lastActivityAt != null) {
                                     Text(formatChatTimestamp(chat.lastActivityAt), color = Muted, fontSize = 10.sp)
                                 }
-                                if (chat.isMuted) Text("🔕", fontSize = 12.sp)
-                                if (chat.isBlocked) Text("Заблокирован", color = Color(0xFFE05260), fontSize = 9.sp)
-                                Text("›", color = Muted, fontSize = 22.sp)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (chat.unreadCount > 0) {
+                                        Box(
+                                            Modifier.clip(CircleShape).background(Red).padding(horizontal = 7.dp, vertical = 3.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                if (chat.unreadCount > 99) "99+" else chat.unreadCount.toString(),
+                                                color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                    if (chat.isMuted) Text("🔕", fontSize = 12.sp)
+                                    if (chat.isBlocked) Text("Заблокирован", color = Color(0xFFE05260), fontSize = 9.sp)
+                                    Text("›", color = Muted, fontSize = 22.sp)
+                                }
                             }
                         }
                     }
@@ -2467,6 +2483,8 @@ private fun ChatScreen(
 
     DisposableEffect(chatId) {
         val chatRef = db.collection("chats").document(chatId)
+        var firstMessageSnapshot = true
+        val seenIncomingMessageIds = mutableSetOf<String>()
         val chatListener = chatRef.addSnapshotListener { doc, exception ->
             if (exception == null && doc != null && doc.exists()) {
                 isGroupChat = doc.getBoolean("isGroup") == true
@@ -2499,8 +2517,20 @@ private fun ChatScreen(
                         }.toMap()
                         MessageItem(doc.id, doc.getString("senderId") ?: "", doc.getString("senderName") ?: "Пользователь", doc.getString("text") ?: "", doc.getTimestamp("deliveredAt") != null, doc.getTimestamp("readAt") != null, doc.metadata.hasPendingWrites(), doc.getTimestamp("createdAt") ?: doc.getTimestamp("clientCreatedAt"), doc.getString("replyToId") ?: "", doc.getString("replyToText") ?: "", doc.getString("mediaUrl") ?: "", doc.getString("mediaType") ?: "", doc.getBoolean("edited") == true, reactions, doc.getString("forwardedFrom") ?: "", doc.getLong("mediaDurationMs") ?: 0L)
                     }
+                    val newIncomingMessages = docs.filter { doc ->
+                        doc.getString("senderId") != myUid && seenIncomingMessageIds.add(doc.id)
+                    }
+                    val resetUnreadState = firstMessageSnapshot || newIncomingMessages.isNotEmpty()
+                    firstMessageSnapshot = false
                     val batch = db.batch()
                     var changed = false
+                    if (resetUnreadState) {
+                        batch.update(chatRef, mapOf(
+                            "unreadCounts.$myUid" to 0,
+                            "lastReadAt.$myUid" to FieldValue.serverTimestamp()
+                        ))
+                        changed = true
+                    }
                     // Opening/keeping this chat visible means incoming messages are
                     // both delivered and read. Apply both timestamps from the live
                     // snapshot so receipts also work for messages arriving later.

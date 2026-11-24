@@ -71,7 +71,8 @@ service cloud.firestore {
           'members', 'memberNames', 'title', 'avatarUrl',
           'lastMessage', 'updatedAt', 'typingAt',
           'mutedFor', 'hiddenFor', 'blockedBy',
-          'pinnedMessageId', 'pinnedMessageText'
+          'pinnedMessageId', 'pinnedMessageText',
+          'unreadCounts', 'lastReadAt'
         ]);
       }
 
@@ -106,6 +107,30 @@ service cloud.firestore {
             ownArrayEntryChangeAllowed(
               resource.data.get('hiddenFor', []),
               request.resource.data.get('hiddenFor', [])
+            ));
+      }
+
+      function ownMapEntryChangeAllowed(oldValues, newValues) {
+        return oldValues is map && newValues is map
+          && newValues.diff(oldValues).affectedKeys().hasOnly([request.auth.uid]);
+      }
+
+      function userUnreadStateChangeAllowed() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        let newCounts = request.resource.data.get('unreadCounts', {});
+        let newReadAt = request.resource.data.get('lastReadAt', {});
+        return (!changed.hasAny(['unreadCounts']) ||
+            (ownMapEntryChangeAllowed(
+                resource.data.get('unreadCounts', {}),
+                newCounts
+              )
+              && newCounts.get(request.auth.uid, 0) is int
+              && newCounts.get(request.auth.uid, 0) >= 0
+              && newCounts.get(request.auth.uid, 0) <= 999999))
+          && (!changed.hasAny(['lastReadAt']) ||
+            ownMapEntryChangeAllowed(
+              resource.data.get('lastReadAt', {}),
+              newReadAt
             ));
       }
 
@@ -160,6 +185,7 @@ service cloud.firestore {
         && (request.resource.data.members == resource.data.members || membershipChangeAllowed())
         && groupMetadataChangeAllowed()
         && userArrayFieldsChangeAllowed()
+        && userUnreadStateChangeAllowed()
         && typingFieldChangeAllowed()
         && blockFieldChangeAllowed()
         && lastMessageChangeAllowed()
@@ -183,6 +209,7 @@ service cloud.firestore {
         allow read: if chatExistsAndUserIsMember();
         allow create: if chatExistsAndUserIsMember()
           && messageSenderIsNotBlocked()
+          && !request.resource.data.keys().hasAny(['unreadCounted'])
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.get('text', '') is string
           && request.resource.data.get('text', '').size() <= 5000

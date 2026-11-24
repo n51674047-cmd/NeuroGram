@@ -51,7 +51,9 @@ beforeEach(async () => {
       blockedBy: [],
       mutedFor: [],
       hiddenFor: [],
-      typingAt: {}
+      typingAt: {},
+      unreadCounts: { alice: 0, bob: 2, carol: 1 },
+      lastReadAt: {}
     });
 
     await setDoc(doc(db, "chats", "group", "messages", "alice-message"), {
@@ -121,6 +123,24 @@ test("a member can leave a group without removing another member", async () => {
 
   await assertFails(updateDoc(doc(db, "chats", "group"), {
     members: ["alice", "bob"]
+  }));
+});
+
+test("a member can reset only their own unread count and read cursor", async () => {
+  const bobDb = testEnv.authenticatedContext("bob").firestore();
+  const chatRef = doc(bobDb, "chats", "group");
+
+  await assertSucceeds(updateDoc(chatRef, {
+    "unreadCounts.bob": 0,
+    "lastReadAt.bob": Timestamp.now()
+  }));
+
+  await assertFails(updateDoc(chatRef, {
+    "unreadCounts.alice": 0
+  }));
+
+  await assertFails(updateDoc(chatRef, {
+    "lastReadAt.carol": Timestamp.now()
   }));
 });
 
@@ -202,6 +222,23 @@ test("voice messages without a valid duration are rejected", async () => {
   await assertFails(setDoc(doc(db, "chats", "group", "messages", "voice-too-long"), {
     ...base,
     mediaDurationMs: 120001
+  }));
+});
+
+test("a client cannot forge the server-managed unread marker", async () => {
+  const db = testEnv.authenticatedContext("bob").firestore();
+
+  await assertFails(setDoc(doc(db, "chats", "group", "messages", "forged-unread-marker"), {
+    senderId: "bob",
+    senderName: "Bob",
+    text: "Hello",
+    mediaUrl: "",
+    mediaType: "",
+    createdAt: Timestamp.now(),
+    deliveredAt: null,
+    readAt: null,
+    edited: false,
+    unreadCounted: true
   }));
 });
 
