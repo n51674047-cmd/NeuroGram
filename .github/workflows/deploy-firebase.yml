@@ -1,4 +1,4 @@
-name: Deploy NovixGram Firebase backend
+name: Deploy NeuroGram Firebase backend
 
 on:
   workflow_dispatch:
