@@ -13,8 +13,8 @@ android {
         applicationId = "com.neurogram.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 38
-        versionName = "0.6.3"
+        versionCode = 39
+        versionName = "0.6.4"
     }
 
     buildFeatures {
