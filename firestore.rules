@@ -116,22 +116,15 @@ service cloud.firestore {
       }
 
       function userUnreadStateChangeAllowed() {
-        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        let oldCounts = resource.data.get('unreadCounts', {});
         let newCounts = request.resource.data.get('unreadCounts', {});
+        let oldReadAt = resource.data.get('lastReadAt', {});
         let newReadAt = request.resource.data.get('lastReadAt', {});
-        return (!changed.hasAny(['unreadCounts']) ||
-            (ownMapEntryChangeAllowed(
-                resource.data.get('unreadCounts', {}),
-                newCounts
-              )
-              && newCounts.get(request.auth.uid, 0) is int
-              && newCounts.get(request.auth.uid, 0) >= 0
-              && newCounts.get(request.auth.uid, 0) <= 999999))
-          && (!changed.hasAny(['lastReadAt']) ||
-            ownMapEntryChangeAllowed(
-              resource.data.get('lastReadAt', {}),
-              newReadAt
-            ));
+        return ownMapEntryChangeAllowed(oldCounts, newCounts)
+          && newCounts.get(request.auth.uid, 0) is int
+          && newCounts.get(request.auth.uid, 0) >= 0
+          && newCounts.get(request.auth.uid, 0) <= 999999
+          && ownMapEntryChangeAllowed(oldReadAt, newReadAt);
       }
 
       function typingFieldChangeAllowed() {
