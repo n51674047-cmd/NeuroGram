@@ -4,6 +4,7 @@ const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { incrementUnreadCounts } = require("./unread-counts");
+const { buildMessagePreview } = require("./message-preview");
 
 initializeApp();
 setGlobalOptions({ region: "europe-west1", maxInstances: 10 });
@@ -55,7 +56,7 @@ exports.sendNewMessagePush = onDocumentCreated(
     if (!message || typeof message.senderId !== "string") return;
     const text = typeof message.text === "string" ? message.text : "";
     const mediaType = typeof message.mediaType === "string" ? message.mediaType : "";
-    if (!text && !mediaType) return;
+    if (!text.trim() && !mediaType) return;
 
     const db = getFirestore();
     const chatRef = db.collection("chats").doc(event.params.chatId);
@@ -67,8 +68,7 @@ exports.sendNewMessagePush = onDocumentCreated(
     const mutedFor = Array.isArray(chat.mutedFor) ? chat.mutedFor : [];
     const senderName = typeof message.senderName === "string" && message.senderName
       ? message.senderName : "Новое сообщение";
-    const preview = mediaType === "image" ? "📷 Фото"
-      : mediaType === "video" ? "▶ Видео" : text.slice(0, 140);
+    const preview = buildMessagePreview(message);
 
     for (const recipientUid of recipients) {
       if (mutedFor.includes(recipientUid)) continue;
