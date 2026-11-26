@@ -10,6 +10,8 @@ function timestampMillis(value) {
   return null;
 }
 
+const MAX_UNREAD_COUNT = 999999;
+
 function incrementUnreadCounts({
   members = [],
   senderId,
@@ -40,11 +42,13 @@ function incrementUnreadCounts({
     }
 
     const current = Number(next[memberUid]);
-    next[memberUid] =
-      (Number.isFinite(current) && current > 0 ? Math.floor(current) : 0) + 1;
+    const safeCurrent = Number.isFinite(current) && current > 0
+      ? Math.min(Math.floor(current), MAX_UNREAD_COUNT)
+      : 0;
+    next[memberUid] = Math.min(safeCurrent + 1, MAX_UNREAD_COUNT);
   }
 
   return next;
 }
 
-module.exports = { incrementUnreadCounts };
+module.exports = { incrementUnreadCounts, MAX_UNREAD_COUNT };
