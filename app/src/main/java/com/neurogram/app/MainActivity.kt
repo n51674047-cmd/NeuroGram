@@ -3526,6 +3526,7 @@ private fun SettingsScreen(section: String, onBack: () -> Unit) {
         }
     }
     fun setOption(key: String, value: Boolean) {
+        val previousValue = options[key] == true
         options[key] = value
         prefs.edit().putBoolean(key, value).apply()
         if (key == "privacy_online") {
@@ -3545,7 +3546,9 @@ private fun SettingsScreen(section: String, onBack: () -> Unit) {
                 }.addOnSuccessListener {
                     privacySyncMessage = if (value) "Статус активности снова виден." else "Статус активности скрыт."
                 }.addOnFailureListener {
-                    privacySyncMessage = "Не удалось синхронизировать настройку: ${it.localizedMessage}"
+                    options[key] = previousValue
+                    prefs.edit().putBoolean(key, previousValue).apply()
+                    privacySyncMessage = "Не удалось сохранить настройку. Прежнее значение восстановлено: ${it.localizedMessage}"
                 }
             }
         }
