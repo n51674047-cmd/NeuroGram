@@ -2753,7 +2753,24 @@ private fun ChatScreen(
                                     if (message.forwardedFrom.isNotBlank()) Text("↗ Переслано от ${message.forwardedFrom}", color = if (mine) Color.White.copy(alpha = 0.78f) else Red, fontSize = 10.sp)
                                     if (message.replyToText.isNotBlank()) {
                                         Text("↪ ${message.replyToText.take(90)}", color = if (mine) Color.White.copy(alpha = 0.78f) else Red,
-                                            fontSize = 11.sp, maxLines = 2, modifier = Modifier.padding(bottom = 4.dp))
+                                            fontSize = 11.sp, maxLines = 2,
+                                            modifier = Modifier.padding(bottom = 4.dp).clickable {
+                                                val target = messages.firstOrNull { it.id == message.replyToId }
+                                                if (target != null) {
+                                                    val targetDateKey = target.createdAt?.toDate()?.let {
+                                                        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(it)
+                                                    } ?: "unknown"
+                                                    val targetGroup = groupedMessages.indexOfFirst { it.first == targetDateKey }
+                                                    if (targetGroup >= 0) {
+                                                        val targetDay = groupedMessages[targetGroup].second
+                                                        val targetWithinDay = targetDay.indexOfFirst { it.id == target.id }
+                                                        if (targetWithinDay >= 0) {
+                                                            val lazyIndex = groupedMessages.take(targetGroup).sumOf { 1 + it.second.size } + 1 + targetWithinDay
+                                                            chatScope.launch { listState.animateScrollToItem(lazyIndex) }
+                                                        }
+                                                    }
+                                                }
+                                            })
                                     }
                                     if (message.mediaType == "image" && message.mediaUrl.isNotBlank()) {
                                         AsyncImage(model = message.mediaUrl, contentDescription = "Фото в сообщении",
