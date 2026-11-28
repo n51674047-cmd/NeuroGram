@@ -1,4 +1,10 @@
-# NeuroGram 0.6.8
+# NeuroGram 0.6.9
+
+## NeuroGram 0.6.9
+
+- Добавлен ресурс `@drawable/neurogram_icon` и манифест переведён на новое имя NeuroGram; существующий файл изображения сохранён без изменения содержимого.
+
+## NeuroGram 0.6.8
 
 ## NeuroGram 0.6.8
 
