@@ -2158,6 +2158,13 @@ private fun ChatScreen(
     var viewingImageUrl by remember(chatId) { mutableStateOf<String?>(null) }
     var viewingVideoUrl by remember(chatId) { mutableStateOf<String?>(null) }
     var replyingTo by remember(chatId) { mutableStateOf<MessageItem?>(null) }
+    var highlightedMessageId by remember(chatId) { mutableStateOf("") }
+    LaunchedEffect(highlightedMessageId) {
+        if (highlightedMessageId.isNotBlank()) {
+            delay(1400)
+            highlightedMessageId = ""
+        }
+    }
     var editingMessageId by remember(chatId) { mutableStateOf("") }
     var showForwardDialog by remember { mutableStateOf(false) }
     var forwardingMessage by remember { mutableStateOf<MessageItem?>(null) }
@@ -2744,6 +2751,7 @@ private fun ChatScreen(
                             Row(
                                 modifier = Modifier.widthIn(max = 310.dp)
                                     .then(if (mine) Modifier.background(Red, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 5.dp)) else Modifier.glassSurface(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 5.dp, bottomEnd = 18.dp)))
+                                    .then(if (highlightedMessageId == message.id) Modifier.border(2.dp, Color(0xFFFFC857), RoundedCornerShape(18.dp)) else Modifier)
                                     .combinedClickable(onClick = {}, onLongClick = { selectedMessage = message })
                                     .padding(start = 14.dp, end = 10.dp, top = 9.dp, bottom = 7.dp)
                                     .animateContentSize(),
@@ -2766,7 +2774,10 @@ private fun ChatScreen(
                                                         val targetWithinDay = targetDay.indexOfFirst { it.id == target.id }
                                                         if (targetWithinDay >= 0) {
                                                             val lazyIndex = groupedMessages.take(targetGroup).sumOf { 1 + it.second.size } + 1 + targetWithinDay
-                                                            chatScope.launch { listState.animateScrollToItem(lazyIndex) }
+                                                            chatScope.launch {
+                                                                listState.animateScrollToItem(lazyIndex)
+                                                                highlightedMessageId = target.id
+                                                            }
                                                         }
                                                     }
                                                 }
